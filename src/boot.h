@@ -35,10 +35,7 @@ static inline uint64_t rdtsc(void) {
 void rootfs_init(void);
 void rootfs_load_module(void);
 void root_task_init(paddr_t untyped_base, uint64_t untyped_size);
-void ramfs_bin_seed_init(void);
-void ramfs_etc_seed_init(void);
-void ramfs_usr_seed_init(void);
-void ramfs_sbin_seed_init(void);
+void ramfs_extract_tree(void);
 
 tid_t pager_init(void);
 tid_t devfs_init(void);

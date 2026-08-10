@@ -341,6 +341,13 @@ $(APPS_BUILD_DIR)/stub/stub: $(APPS_BUILD_DIR)/stub/stub.c.o apps/link/stub.ld
 ROOTFS_STAGE := $(BUILD_DIR)/rootfs-stage
 ROOTFS_MINIBOX_ALIASES := ls cat touch tail cp
 ROOTFS_STUB_NAMES := root_task file find mv
+ROOTFS_MINIBOX_SYMLINKS := basename cal cat clear cmp cp cut date \
+                            dirname echo env expand factor false fold \
+                            free grep head hexdump hostname kill link \
+                            ls mkdir mknod nohup od paste ps rm \
+                            rmdir sleep sort sync tail touch tr true \
+                            tty unexpand uniq unlink update uptime vmstat \
+                            w wc whoami xxd yes
 
 $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/ramfs \
                          $(APPS_BUILD_DIR)/procfs/procfs $(APPS_BUILD_DIR)/sysfs/sysfs \
@@ -361,7 +368,8 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/stub/stub \
                          apps/hello_initsys/rc.conf etc/passwd
 	rm -rf $(ROOTFS_STAGE)
-	mkdir -p $(ROOTFS_STAGE)
+	mkdir -p $(ROOTFS_STAGE) $(ROOTFS_STAGE)/bin $(ROOTFS_STAGE)/sbin \
+	         $(ROOTFS_STAGE)/etc $(ROOTFS_STAGE)/usr/bin $(ROOTFS_STAGE)/usr/sbin
 	cp $(APPS_BUILD_DIR)/devfs/devfs $(ROOTFS_STAGE)/devfs
 	cp $(APPS_BUILD_DIR)/ramfs/ramfs $(ROOTFS_STAGE)/ramfs
 	cp $(APPS_BUILD_DIR)/procfs/procfs $(ROOTFS_STAGE)/procfs
@@ -369,22 +377,26 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	cp $(APPS_BUILD_DIR)/bootfs/bootfs $(ROOTFS_STAGE)/bootfs
 	cp $(APPS_BUILD_DIR)/diskfs/diskfs $(ROOTFS_STAGE)/diskfs
 	cp $(APPS_BUILD_DIR)/pager/pager $(ROOTFS_STAGE)/pager
-	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/reboot
-	cp $(APPS_BUILD_DIR)/powertools/halt $(ROOTFS_STAGE)/halt
-	cp $(APPS_BUILD_DIR)/powertools/shutdown $(ROOTFS_STAGE)/shutdown
 	cp $(APPS_BUILD_DIR)/sigtest/sigtest $(ROOTFS_STAGE)/sigtest
 	cp $(APPS_BUILD_DIR)/consoletest/consoletest $(ROOTFS_STAGE)/consoletest
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
-	cp $(APPS_BUILD_DIR)/am/am $(ROOTFS_STAGE)/am
-	cp $(APPS_BUILD_DIR)/top/top $(ROOTFS_STAGE)/top
 	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
-	cp $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(ROOTFS_STAGE)/hello_initsys
-	cp apps/hello_initsys/rc.conf $(ROOTFS_STAGE)/rc.conf
-	cp etc/passwd $(ROOTFS_STAGE)/passwd
-	cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/minibox
-	cp $(APPS_BUILD_DIR)/sh/sh $(ROOTFS_STAGE)/sh
+	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/sbin/reboot
+	cp $(APPS_BUILD_DIR)/powertools/halt $(ROOTFS_STAGE)/sbin/halt
+	cp $(APPS_BUILD_DIR)/powertools/shutdown $(ROOTFS_STAGE)/sbin/shutdown
+	cp $(APPS_BUILD_DIR)/am/am $(ROOTFS_STAGE)/bin/am
+	cp $(APPS_BUILD_DIR)/top/top $(ROOTFS_STAGE)/bin/top
+	cp $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(ROOTFS_STAGE)/usr/sbin/hello_initsys
+	cp apps/hello_initsys/rc.conf $(ROOTFS_STAGE)/etc/rc.conf
+	cp etc/passwd $(ROOTFS_STAGE)/etc/passwd
+	cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/bin/minibox
+	cp $(APPS_BUILD_DIR)/sh/sh $(ROOTFS_STAGE)/bin/sh
+	cp $(APPS_BUILD_DIR)/stub/stub $(ROOTFS_STAGE)/bin/file
+	cp $(APPS_BUILD_DIR)/stub/stub $(ROOTFS_STAGE)/bin/find
+	cp $(APPS_BUILD_DIR)/stub/stub $(ROOTFS_STAGE)/bin/mv
 	for n in $(ROOTFS_MINIBOX_ALIASES); do cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/$$n; done
 	for n in $(ROOTFS_STUB_NAMES); do cp $(APPS_BUILD_DIR)/stub/stub $(ROOTFS_STAGE)/$$n; done
+	for n in $(ROOTFS_MINIBOX_SYMLINKS); do ln -sf bin/minibox $(ROOTFS_STAGE)/bin/$$n; done
 	(cd $(ROOTFS_STAGE) && tar --format ustar -cf $(abspath $@) $$(ls))
 
 QEMU ?= qemu-system-x86_64

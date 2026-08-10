@@ -352,10 +352,12 @@ static void seed_fixed_dirs(void) {
     seed_dir("bin", VFS_ROOT_INO);
     seed_dir("etc", VFS_ROOT_INO);
     uint64_t var_ino = seed_dir("var", VFS_ROOT_INO);
-    if (var_ino) seed_dir("var/tmp", var_ino);
     if (var_ino) {
         seed_dir("var/tmp", var_ino);
         seed_dir("var/root", var_ino);
+        seed_dir("var/lock", var_ino);
+        seed_dir("var/lib", var_ino);
+        seed_dir("var/run", var_ino);
     }
     seed_dir("sbin", VFS_ROOT_INO);
     uint64_t usr_ino = seed_dir("usr", VFS_ROOT_INO);

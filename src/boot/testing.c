@@ -16,10 +16,7 @@ static tid_t g_sh_tid;
 static void test_report_entry(void) {
     msg_regs_t m;
     tid_t from;
-    ramfs_bin_seed_init();
-    ramfs_etc_seed_init();
-    ramfs_usr_seed_init();
-    ramfs_sbin_seed_init();
+    ramfs_extract_tree();
     const char *starter = cmdline_get("starter");
     if (!starter) {
         starter = "sh";

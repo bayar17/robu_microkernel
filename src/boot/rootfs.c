@@ -87,116 +87,53 @@ void root_task_init(paddr_t untyped_base, uint64_t untyped_size) {
     kprintf("[boot] root task: tid=%u\n", root->tid);
 }
 
-static void seed_binary_copy(const char *rootfs_name, const char *ramfs_path) {
-    const uint8_t *start, *end;
-    if (rootfs_lookup(rootfs_name, &start, &end) != 0) {
-        kprintf("[boot] seed: FATAL: rootfs has no entry named '%s'\n", rootfs_name);
-        for (;;) { asm volatile("cli; hlt"); }
-    }
-    uint64_t sz = (uint64_t)(end - start);
-    int64_t h = vfs_open(ramfs_tid(), ramfs_path, VFS_O_CREAT | VFS_O_TRUNC);
-    if (h < 0) {
-        kprintf("[boot] seed: FATAL: vfs_open('%s') failed rc=%ld\n", ramfs_path, h);
-        for (;;) { asm volatile("cli; hlt"); }
-    }
-    uint64_t off = 0;
-    while (off < sz) {
-        uint64_t chunk = sz - off;
-        if (chunk > VFS_WRITE_MAX) {
-            chunk = VFS_WRITE_MAX;
+void ramfs_extract_tree(void) {
+    tar_entry_t entry;
+    uint64_t index = 0;
+    uint32_t nfiles = 0, nsyms = 0;
+    while (tar_iterate_all(rootfs_buf, rootfs_len, index, &entry) == 0) {
+        index++;
+        int has_slash = 0;
+        for (int i = 0; entry.name[i]; i++) {
+            if (entry.name[i] == '/') {
+                has_slash = 1;
+                break;
+            }
         }
-        int64_t n = vfs_write(ramfs_tid(), (uint64_t)h, start + off, chunk);
-        if (n <= 0) {
-            kprintf("[boot] seed: FATAL: vfs_write('%s') failed at off=%lu\n",
-                    ramfs_path, off);
+        if (!has_slash) {
+            continue;
+        }
+        if (entry.type == TAR_ENTRY_SYMLINK) {
+            int64_t rc = vfs_symlink(ramfs_tid(), entry.name, entry.linkname);
+            if (rc != 0) {
+                kprintf("[boot] rootfs extract: FATAL: vfs_symlink('%s' -> '%s') failed rc=%ld\n",
+                        entry.name, entry.linkname, rc);
+                for (;;) { asm volatile("cli; hlt"); }
+            }
+            nsyms++;
+            continue;
+        }
+        int64_t h = vfs_open(ramfs_tid(), entry.name, VFS_O_CREAT | VFS_O_TRUNC);
+        if (h < 0) {
+            kprintf("[boot] rootfs extract: FATAL: vfs_open('%s') failed rc=%ld\n", entry.name, h);
             for (;;) { asm volatile("cli; hlt"); }
         }
-        off += (uint64_t)n;
-    }
-    vfs_close(ramfs_tid(), (uint64_t)h);
-}
-
-void ramfs_bin_seed_init(void) {
-    static const char *const real_names[] = {
-        "sh", "minibox", "file", "find", "mv", "am", "top"
-    };
-    for (unsigned i = 0; i < sizeof(real_names) / sizeof(real_names[0]); i++) {
-        char path[VFS_NAME_MAX] = "bin/";
-        for (uint32_t j = 0, p = 4; real_names[i][j] && p < sizeof(path) - 1; j++, p++) {
-            path[p] = real_names[i][j];
+        uint64_t off = 0;
+        while (off < entry.size) {
+            uint64_t chunk = entry.size - off;
+            if (chunk > VFS_WRITE_MAX) {
+                chunk = VFS_WRITE_MAX;
+            }
+            int64_t n = vfs_write(ramfs_tid(), (uint64_t)h, entry.data + off, chunk);
+            if (n <= 0) {
+                kprintf("[boot] rootfs extract: FATAL: vfs_write('%s') failed at off=%lu\n",
+                        entry.name, off);
+                for (;;) { asm volatile("cli; hlt"); }
+            }
+            off += (uint64_t)n;
         }
-        seed_binary_copy(real_names[i], path);
+        vfs_close(ramfs_tid(), (uint64_t)h);
+        nfiles++;
     }
-
-    static const char *const minibox_cmds[] = {
-        "basename", "cal", "cat", "clear", "cmp", "cp", "cut", "date",
-        "dirname", "echo", "env", "expand", "factor", "false", "fold",
-        "free", "grep", "head", "hexdump", "hostname", "kill", "link",
-        "ls", "mkdir", "mknod", "nohup", "od", "paste", "ps", "rm",
-        "rmdir", "sleep", "sort", "sync", "tail", "touch", "tr", "true",
-        "tty", "unexpand", "uniq", "unlink", "update", "uptime", "vmstat",
-        "w", "wc", "whoami", "xxd", "yes"
-    };
-    unsigned nsyms = sizeof(minibox_cmds) / sizeof(minibox_cmds[0]);
-    for (unsigned i = 0; i < nsyms; i++) {
-        char path[VFS_NAME_MAX] = "bin/";
-        for (uint32_t j = 0, p = 4; minibox_cmds[i][j] && p < sizeof(path) - 1; j++, p++) {
-            path[p] = minibox_cmds[i][j];
-        }
-        int64_t rc = vfs_symlink(ramfs_tid(), path, "bin/minibox");
-        if (rc != 0) {
-            kprintf("[boot] /bin seed: FATAL: vfs_symlink('%s') failed rc=%ld\n", path, rc);
-            for (;;) { asm volatile("cli; hlt"); }
-        }
-    }
-    kprintf("[boot] /bin seed: %lu real binaries + %u symlinks copied into ramfs\n",
-            (uint64_t)(sizeof(real_names) / sizeof(real_names[0])), nsyms);
-}
-
-void ramfs_usr_seed_init(void) {
-    seed_binary_copy("hello_initsys", "usr/sbin/hello_initsys");
-    kprintf("[boot] /usr seed: hello_initsys copied into ramfs\n");
-}
-
-void ramfs_sbin_seed_init(void) {
-    seed_binary_copy("reboot", "sbin/reboot");
-    seed_binary_copy("halt", "sbin/halt");
-    seed_binary_copy("shutdown", "sbin/shutdown");
-    kprintf("[boot] /sbin seed: reboot, halt, shutdown copied into ramfs\n");
-}
-
-static void seed_etc_file(const char *rootfs_name, const char *ramfs_path) {
-    const uint8_t *start, *end;
-    if (rootfs_lookup(rootfs_name, &start, &end) != 0) {
-        kprintf("[boot] /etc seed: no '%s' entry in rootfs, skipping\n", rootfs_name);
-        return;
-    }
-    uint64_t sz = (uint64_t)(end - start);
-
-    int64_t h = vfs_open(ramfs_tid(), ramfs_path, VFS_O_CREAT | VFS_O_TRUNC);
-    if (h < 0) {
-        kprintf("[boot] /etc seed: vfs_open('%s') failed rc=%ld\n", ramfs_path, h);
-        return;
-    }
-    uint64_t off = 0;
-    while (off < sz) {
-        uint64_t chunk = sz - off;
-        if (chunk > VFS_WRITE_MAX) {
-            chunk = VFS_WRITE_MAX;
-        }
-        int64_t n = vfs_write(ramfs_tid(), (uint64_t)h, start + off, chunk);
-        if (n <= 0) {
-            kprintf("[boot] /etc seed: vfs_write('%s') failed at off=%lu\n", ramfs_path, off);
-            vfs_close(ramfs_tid(), (uint64_t)h);
-            return;
-        }
-        off += (uint64_t)n;
-    }
-    vfs_close(ramfs_tid(), (uint64_t)h);
-    kprintf("[boot] /etc seed: %s (%lu bytes) copied into ramfs\n", ramfs_path, sz);
-}
-
-void ramfs_etc_seed_init(void) {
-    seed_etc_file("rc.conf", "etc/rc.conf");
-    seed_etc_file("passwd", "etc/passwd");
+    kprintf("[boot] rootfs extract: %u files + %u symlinks copied into ramfs\n", nfiles, nsyms);
 }
