@@ -1,18 +1,18 @@
 [submodule "apps/mlibc"]
 	path = apps/mlibc
-	url = https://github.com/managarm/mlibc
+	url = https://github.com/bayar17/mlibc.git
 [submodule "apps/minibox"]
 	path = apps/minibox
-	url = https://github.com/Qwer-TeX/minibox
+	url = https://github.com/bayar17/minibox.git
 [submodule "apps/confuse"]
 	path = apps/confuse
-	url = https://github.com/libconfuse/libconfuse.git
+	url = https://github.com/bayar17/libconfuse.git
 [submodule "apps/uACPI"]
 	path = apps/uACPI
 	url = https://github.com/uACPI/uACPI.git
 [submodule "apps/readline"]
 	path = apps/readline
-	url = https://git.savannah.gnu.org/git/readline.git
+	url = https://github.com/bayar17/readline.git
 [submodule "apps/bash"]
 	path = apps/bash
-	url = https://git.savannah.gnu.org/git/bash.git
+	url = https://github.com/bayar17/bash.git
