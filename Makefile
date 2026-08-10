@@ -45,7 +45,8 @@ ASM_SRCS := $(wildcard $(ARCH_DIR)/src/*.S)
 
 OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.c.o) $(ASM_SRCS:%.S=$(BUILD_DIR)/%.S.o)
 
-.PHONY: all _all clean mlibc _mlibc minibox run mlibc-hello iso _iso
+.PHONY: all _all clean mlibc _mlibc minibox run mlibc-hello iso _iso \
+        readline _readline bash-configure _bash-configure bash-build _bash-build
 
 all:
 	./scripts/identify-os.sh _all
@@ -330,7 +331,10 @@ $(READLINE_BUILD_DIR)/%.c.o: $(READLINE_DIR)/%.c mlibc
 $(READLINE_BUILD_DIR)/libreadline.a: $(READLINE_OBJS)
 	$(AR) rcs $@ $(READLINE_OBJS)
 
-readline: $(READLINE_BUILD_DIR)/libreadline.a
+readline:
+	./scripts/identify-os.sh _readline
+
+_readline: $(READLINE_BUILD_DIR)/libreadline.a
 
 BASH_DIR := apps/bash
 BASH_BUILD_DIR := $(APPS_BUILD_DIR)/bash
@@ -345,9 +349,15 @@ $(BASH_DIR)/config.h: $(BASH_DIR)/robu.cache mlibc readline
 	        --without-bash-malloc --enable-readline --enable-job-control \
 	        --disable-nls --disable-rpath --without-libiconv-prefix --without-libintl-prefix
 
-bash-configure: $(BASH_DIR)/config.h
+bash-configure:
+	./scripts/identify-os.sh _bash-configure
 
-bash-build: $(BASH_DIR)/config.h
+_bash-configure: $(BASH_DIR)/config.h
+
+bash-build:
+	./scripts/identify-os.sh _bash-build
+
+_bash-build: $(BASH_DIR)/config.h
 	touch $(BASH_DIR)/configure.ac $(BASH_DIR)/aclocal.m4 $(BASH_DIR)/config.h.in
 	touch $(BASH_DIR)/configure
 	$(MAKE) -C $(BASH_DIR)
