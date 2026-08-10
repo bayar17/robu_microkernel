@@ -16,11 +16,18 @@
 #define VFS_OP_SYMLINK 10
 #define VFS_OP_QUIESCE 11
 #define VFS_OP_PEEK    12
+#define VFS_OP_MKDIR   13
+#define VFS_OP_RMDIR   14
+#define VFS_OP_LINK    15
+#define VFS_OP_MKNOD   16
 #define VFS_ERR_NOT_FOUND     (-1)
 #define VFS_ERR_BAD_HANDLE    (-2)
 #define VFS_ERR_NOT_SUPPORTED (-3)
 #define VFS_ERR_NO_SPACE      (-4)
 #define VFS_ERR_IS_DIR        (-5)
+#define VFS_ERR_EXISTS        (-6)
+#define VFS_ERR_NOT_DIR       (-7)
+#define VFS_ERR_NOT_EMPTY     (-8)
 #define VFS_NAME_MAX  20
 #define VFS_PATH_MAX  32
 #define VFS_READ_MAX  40
@@ -123,6 +130,41 @@ typedef struct {
 typedef struct {
     int64_t status;
 } vfs_quiesce_reply_t;
+typedef struct {
+    uint64_t op;
+    char name[VFS_PATH_MAX];
+} vfs_mkdir_req_t;
+_Static_assert(sizeof(vfs_mkdir_req_t) <= 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+} vfs_mkdir_reply_t;
+typedef struct {
+    uint64_t op;
+    char name[VFS_PATH_MAX];
+} vfs_rmdir_req_t;
+_Static_assert(sizeof(vfs_rmdir_req_t) <= 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+} vfs_rmdir_reply_t;
+typedef struct {
+    uint64_t op;
+    char oldname[VFS_NAME_MAX];
+    char newname[VFS_NAME_MAX];
+} vfs_link_req_t;
+_Static_assert(sizeof(vfs_link_req_t) == 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+} vfs_link_reply_t;
+typedef struct {
+    uint64_t op;
+    uint64_t mode;
+    uint64_t dev;
+    char name[VFS_NAME_MAX];
+} vfs_mknod_req_t;
+_Static_assert(sizeof(vfs_mknod_req_t) <= 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+} vfs_mknod_reply_t;
 
 static inline int64_t vfs_mount(const char *prefix) {
     msg_regs_t m = (msg_regs_t){0};
@@ -323,6 +365,74 @@ static inline int64_t vfs_symlink(tid_t server, const char *name, const char *ta
     tid_t from;
     ipc_call(server, &m, &from);
     vfs_symlink_reply_t *reply = (vfs_symlink_reply_t *)&m;
+    return reply->status;
+}
+static inline int64_t vfs_mkdir(tid_t server, const char *name) {
+    msg_regs_t m;
+    vfs_mkdir_req_t *req = (vfs_mkdir_req_t *)&m;
+    req->op = VFS_OP_MKDIR;
+    size_t i = 0;
+    while (name[i] && i < VFS_PATH_MAX - 1) {
+        req->name[i] = name[i];
+        i++;
+    }
+    req->name[i] = '\0';
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_mkdir_reply_t *reply = (vfs_mkdir_reply_t *)&m;
+    return reply->status;
+}
+static inline int64_t vfs_rmdir(tid_t server, const char *name) {
+    msg_regs_t m;
+    vfs_rmdir_req_t *req = (vfs_rmdir_req_t *)&m;
+    req->op = VFS_OP_RMDIR;
+    size_t i = 0;
+    while (name[i] && i < VFS_PATH_MAX - 1) {
+        req->name[i] = name[i];
+        i++;
+    }
+    req->name[i] = '\0';
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_rmdir_reply_t *reply = (vfs_rmdir_reply_t *)&m;
+    return reply->status;
+}
+static inline int64_t vfs_link(tid_t server, const char *oldname, const char *newname) {
+    msg_regs_t m;
+    vfs_link_req_t *req = (vfs_link_req_t *)&m;
+    req->op = VFS_OP_LINK;
+    size_t i = 0;
+    while (oldname[i] && i < VFS_NAME_MAX - 1) {
+        req->oldname[i] = oldname[i];
+        i++;
+    }
+    req->oldname[i] = '\0';
+    i = 0;
+    while (newname[i] && i < VFS_NAME_MAX - 1) {
+        req->newname[i] = newname[i];
+        i++;
+    }
+    req->newname[i] = '\0';
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_link_reply_t *reply = (vfs_link_reply_t *)&m;
+    return reply->status;
+}
+static inline int64_t vfs_mknod(tid_t server, const char *name, uint64_t mode, uint64_t dev) {
+    msg_regs_t m;
+    vfs_mknod_req_t *req = (vfs_mknod_req_t *)&m;
+    req->op = VFS_OP_MKNOD;
+    req->mode = mode;
+    req->dev = dev;
+    size_t i = 0;
+    while (name[i] && i < VFS_NAME_MAX - 1) {
+        req->name[i] = name[i];
+        i++;
+    }
+    req->name[i] = '\0';
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_mknod_reply_t *reply = (vfs_mknod_reply_t *)&m;
     return reply->status;
 }
 static inline int64_t vfs_quiesce(tid_t server) {

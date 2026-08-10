@@ -131,6 +131,16 @@ static uint64_t resolve_parent_ino(const char *path) {
     return (uint64_t)idx + 2;
 }
 
+static int resolve_parent_checked(const char *path, uint64_t *ino_out) {
+    char parent[VFS_PATH_MAX];
+    parent_path(path, parent, sizeof(parent));
+    if (parent[0] == '\0') { *ino_out = VFS_ROOT_INO; return 1; }
+    int idx = find_file(parent);
+    if (idx < 0 || !files[idx].is_dir) return 0;
+    *ino_out = (uint64_t)idx + 2;
+    return 1;
+}
+
 static const char *basename_of(const char *path) {
     size_t len = 0;
     while (path[len]) len++;
@@ -337,6 +347,91 @@ static void handle_symlink(msg_regs_t *m) {
     reply->status = 0;
 }
 
+static void handle_mkdir(msg_regs_t *m) {
+    char name[VFS_PATH_MAX];
+    const vfs_mkdir_req_t *req = (const vfs_mkdir_req_t *)m;
+    for (int i = 0; i < VFS_PATH_MAX; i++) name[i] = req->name[i];
+    vfs_mkdir_reply_t *reply = (vfs_mkdir_reply_t *)m;
+    if (find_file(name) >= 0) { reply->status = VFS_ERR_EXISTS; return; }
+    uint64_t parent_ino;
+    if (!resolve_parent_checked(name, &parent_ino)) { reply->status = VFS_ERR_NOT_FOUND; return; }
+    int idx = alloc_file();
+    files[idx].in_use = 1;
+    files[idx].is_dir = 1;
+    files[idx].is_symlink = 0;
+    files[idx].size = 0;
+    files[idx].capacity = 0;
+    files[idx].data = NULL;
+    set_name(files[idx].name, name, sizeof(files[idx].name));
+    files[idx].parent_ino = parent_ino;
+    reply->status = 0;
+}
+
+static void handle_rmdir(msg_regs_t *m) {
+    char name[VFS_PATH_MAX];
+    const vfs_rmdir_req_t *req = (const vfs_rmdir_req_t *)m;
+    for (int i = 0; i < VFS_PATH_MAX; i++) name[i] = req->name[i];
+    vfs_rmdir_reply_t *reply = (vfs_rmdir_reply_t *)m;
+    int fidx = find_file(name);
+    if (fidx < 0) { reply->status = VFS_ERR_NOT_FOUND; return; }
+    if (!files[fidx].is_dir) { reply->status = VFS_ERR_NOT_DIR; return; }
+    uint64_t ino = (uint64_t)fidx + 2;
+    for (uint32_t i = 0; i < max_files; i++) {
+        if (files[i].in_use && files[i].parent_ino == ino) { reply->status = VFS_ERR_NOT_EMPTY; return; }
+    }
+    files[fidx].in_use = 0;
+    reply->status = 0;
+}
+
+static void handle_link(msg_regs_t *m) {
+    char oldname[VFS_NAME_MAX], newname[VFS_NAME_MAX];
+    const vfs_link_req_t *req = (const vfs_link_req_t *)m;
+    for (int i = 0; i < VFS_NAME_MAX; i++) {
+        oldname[i] = req->oldname[i]; newname[i] = req->newname[i];
+    }
+    vfs_link_reply_t *reply = (vfs_link_reply_t *)m;
+    int raw_idx = find_file(oldname);
+    int fidx = (raw_idx >= 0 && files[raw_idx].is_symlink) ? resolve_path(oldname) : raw_idx;
+    if (fidx < 0) { reply->status = VFS_ERR_NOT_FOUND; return; }
+    if (files[fidx].is_dir) { reply->status = VFS_ERR_IS_DIR; return; }
+    if (find_file(newname) >= 0) { reply->status = VFS_ERR_EXISTS; return; }
+    uint64_t parent_ino;
+    if (!resolve_parent_checked(newname, &parent_ino)) { reply->status = VFS_ERR_NOT_FOUND; return; }
+    uint64_t size = files[fidx].size;
+    uint8_t *srcdata = files[fidx].data;
+    int idx = alloc_file();
+    files[idx].in_use = 1;
+    files[idx].is_dir = 0;
+    files[idx].is_symlink = 0;
+    files[idx].size = size;
+    files[idx].capacity = size;
+    files[idx].data = size ? (uint8_t*)ram_alloc(size) : NULL;
+    for (uint64_t i = 0; i < size; i++) files[idx].data[i] = srcdata[i];
+    set_name(files[idx].name, newname, sizeof(files[idx].name));
+    files[idx].parent_ino = parent_ino;
+    reply->status = 0;
+}
+
+static void handle_mknod(msg_regs_t *m) {
+    char name[VFS_NAME_MAX];
+    const vfs_mknod_req_t *req = (const vfs_mknod_req_t *)m;
+    for (int i = 0; i < VFS_NAME_MAX; i++) name[i] = req->name[i];
+    vfs_mknod_reply_t *reply = (vfs_mknod_reply_t *)m;
+    if (find_file(name) >= 0) { reply->status = VFS_ERR_EXISTS; return; }
+    uint64_t parent_ino;
+    if (!resolve_parent_checked(name, &parent_ino)) { reply->status = VFS_ERR_NOT_FOUND; return; }
+    int idx = alloc_file();
+    files[idx].in_use = 1;
+    files[idx].is_dir = 0;
+    files[idx].is_symlink = 0;
+    files[idx].size = 0;
+    files[idx].capacity = 0;
+    files[idx].data = NULL;
+    set_name(files[idx].name, name, sizeof(files[idx].name));
+    files[idx].parent_ino = parent_ino;
+    reply->status = 0;
+}
+
 static uint64_t seed_dir(const char *name, uint64_t parent_ino) {
     int idx = alloc_file();
     files[idx].in_use = 1;
@@ -383,6 +478,10 @@ void _start(void) {
         case VFS_OP_RENAME:  handle_rename(&m); break;
         case VFS_OP_UNLINK:  handle_unlink(&m); break;
         case VFS_OP_SYMLINK: handle_symlink(&m); break;
+        case VFS_OP_MKDIR:   handle_mkdir(&m); break;
+        case VFS_OP_RMDIR:   handle_rmdir(&m); break;
+        case VFS_OP_LINK:    handle_link(&m); break;
+        case VFS_OP_MKNOD:   handle_mknod(&m); break;
         default: ((vfs_open_reply_t *)&m)->status = VFS_ERR_NOT_FOUND; break;
         }
         ipc_send(from, &m);
