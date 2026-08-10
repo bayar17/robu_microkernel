@@ -38,7 +38,9 @@ endif
 GEN_DIR := $(BUILD_DIR)/generated
 CFLAGS += -I$(GEN_DIR)
 
-C_SRCS := $(wildcard $(SRC_DIR)/*/*.c) $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/src/*.c)
+RING3_SRC_DIRS := $(SRC_DIR)/servers/%.c $(SRC_DIR)/powertools/%.c
+C_SRCS := $(filter-out $(RING3_SRC_DIRS),$(wildcard $(SRC_DIR)/*/*.c)) \
+          $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/src/*.c)
 ASM_SRCS := $(wildcard $(ARCH_DIR)/src/*.S)
 
 OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.c.o) $(ASM_SRCS:%.S=$(BUILD_DIR)/%.S.o)
@@ -70,7 +72,7 @@ $(BUILD_DIR)/%.S.o: %.S
 APPS_BUILD_DIR := $(BUILD_DIR)/apps
 APP_LDFLAGS := -nostdlib -static -z noexecstack
 
-$(APPS_BUILD_DIR)/devfs/devfs.c.o: apps/devfs/devfs.c
+$(APPS_BUILD_DIR)/devfs/devfs.c.o: src/servers/devfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -78,21 +80,21 @@ $(APPS_BUILD_DIR)/devfs/devfs: $(APPS_BUILD_DIR)/devfs/devfs.c.o $(APP_COMMON_OB
 	$(LD) $(APP_LDFLAGS) -T apps/link/devfs.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/devfs/devfs.c.o $(APP_COMMON_OBJ)
 
-$(APPS_BUILD_DIR)/ramfs/ramfs.c.o: apps/ramfs/ramfs.c
+$(APPS_BUILD_DIR)/ramfs/ramfs.c.o: src/servers/ramfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(APPS_BUILD_DIR)/ramfs/ramfs: $(APPS_BUILD_DIR)/ramfs/ramfs.c.o $(APP_COMMON_OBJ) apps/link/ramfs.ld
 	$(LD) $(APP_LDFLAGS) -T apps/link/ramfs.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/ramfs/ramfs.c.o $(APP_COMMON_OBJ)
-$(APPS_BUILD_DIR)/procfs/procfs.c.o: apps/procfs/procfs.c
+$(APPS_BUILD_DIR)/procfs/procfs.c.o: src/servers/procfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(APPS_BUILD_DIR)/procfs/procfs: $(APPS_BUILD_DIR)/procfs/procfs.c.o $(APP_COMMON_OBJ) apps/link/procfs.ld
 	$(LD) $(APP_LDFLAGS) -T apps/link/procfs.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/procfs/procfs.c.o $(APP_COMMON_OBJ)
-$(APPS_BUILD_DIR)/sysfs/sysfs.c.o: apps/sysfs/sysfs.c
+$(APPS_BUILD_DIR)/sysfs/sysfs.c.o: src/servers/sysfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -100,7 +102,7 @@ $(APPS_BUILD_DIR)/sysfs/sysfs: $(APPS_BUILD_DIR)/sysfs/sysfs.c.o $(APP_COMMON_OB
 	$(LD) $(APP_LDFLAGS) -T apps/link/sysfs.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/sysfs/sysfs.c.o $(APP_COMMON_OBJ)
 
-$(APPS_BUILD_DIR)/bootfs/bootfs.c.o: apps/bootfs/bootfs.c
+$(APPS_BUILD_DIR)/bootfs/bootfs.c.o: src/servers/bootfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -108,7 +110,7 @@ $(APPS_BUILD_DIR)/bootfs/bootfs: $(APPS_BUILD_DIR)/bootfs/bootfs.c.o $(APP_COMMO
 	$(LD) $(APP_LDFLAGS) -T apps/link/bootfs.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/bootfs/bootfs.c.o $(APP_COMMON_OBJ)
 
-$(APPS_BUILD_DIR)/diskfs/diskfs.c.o: apps/diskfs/diskfs.c
+$(APPS_BUILD_DIR)/diskfs/diskfs.c.o: src/servers/diskfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -116,7 +118,7 @@ $(APPS_BUILD_DIR)/diskfs/diskfs: $(APPS_BUILD_DIR)/diskfs/diskfs.c.o $(APP_COMMO
 	$(LD) $(APP_LDFLAGS) -T apps/link/diskfs.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/diskfs/diskfs.c.o $(APP_COMMON_OBJ)
 
-$(APPS_BUILD_DIR)/pager/pager.c.o: apps/pager/pager.c
+$(APPS_BUILD_DIR)/pager/pager.c.o: src/servers/pager.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -124,7 +126,7 @@ $(APPS_BUILD_DIR)/pager/pager: $(APPS_BUILD_DIR)/pager/pager.c.o $(APP_COMMON_OB
 	$(LD) $(APP_LDFLAGS) -T apps/link/pager.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/pager/pager.c.o $(APP_COMMON_OBJ)
 
-$(APPS_BUILD_DIR)/powertools/reboot.c.o: apps/powertools/reboot.c
+$(APPS_BUILD_DIR)/powertools/reboot.c.o: src/powertools/reboot.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -132,7 +134,7 @@ $(APPS_BUILD_DIR)/powertools/reboot: $(APPS_BUILD_DIR)/powertools/reboot.c.o app
 	$(LD) $(APP_LDFLAGS) -T apps/link/reboot.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/powertools/reboot.c.o
 
-$(APPS_BUILD_DIR)/powertools/halt.c.o: apps/powertools/halt.c
+$(APPS_BUILD_DIR)/powertools/halt.c.o: src/powertools/halt.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -140,7 +142,7 @@ $(APPS_BUILD_DIR)/powertools/halt: $(APPS_BUILD_DIR)/powertools/halt.c.o apps/li
 	$(LD) $(APP_LDFLAGS) -T apps/link/halt.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/powertools/halt.c.o
 
-$(APPS_BUILD_DIR)/powertools/shutdown.c.o: apps/powertools/shutdown.c
+$(APPS_BUILD_DIR)/powertools/shutdown.c.o: src/powertools/shutdown.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
