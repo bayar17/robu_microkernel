@@ -21,6 +21,8 @@ paddr_t arch_vm_create_address_space(void) {
         spin_unlock(&vm_lock);
         return 0;
     }
+    memset((void *)pml4, 0, PAGE_SIZE_4K);
+    memset((void *)pdpt, 0, PAGE_SIZE_4K);
     pte_t *pdpt_table = (pte_t *)pdpt;
     pte_t *kernel_pdpt = (pte_t *)&boot_pdpt;
     pdpt_table[0] = kernel_pdpt[0];
@@ -133,6 +135,7 @@ paddr_t arch_vm_clone_address_space(paddr_t src) {
 static pte_t *get_next_level(pte_t *table, uint32_t index) {
     if (!(table[index] & X86_PTE_P)) {
         paddr_t new_table = alloc_table();
+        memset((void *)new_table, 0, PAGE_SIZE_4K);
         table[index] = new_table | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
     }
     return (pte_t *)(table[index] & PAGE_MASK_4K);
