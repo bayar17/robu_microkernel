@@ -268,6 +268,48 @@ $(APPS_BUILD_DIR)/mlibc-hello/hello: $(APPS_BUILD_DIR)/mlibc-hello/hello.c.o app
 
 mlibc-hello: $(APPS_BUILD_DIR)/mlibc-hello/hello
 
+AR := $(shell command -v llvm-ar 2>/dev/null || echo /opt/homebrew/opt/llvm/bin/llvm-ar)
+
+READLINE_DIR := apps/readline
+READLINE_BUILD_DIR := $(APPS_BUILD_DIR)/readline
+READLINE_CFLAGS := $(MLIBC_APP_CFLAGS) -I$(READLINE_DIR) -DHAVE_CONFIG_H \
+                    -DRL_LIBRARY_VERSION=\"8.3\" \
+                    -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable \
+                    -Wno-unused-but-set-variable -Wno-sign-compare -Wno-implicit-fallthrough
+
+READLINE_SRCS := readline.c funmap.c keymaps.c vi_mode.c parens.c rltty.c \
+                  complete.c bind.c isearch.c display.c signals.c emacs_keymap.c \
+                  vi_keymap.c util.c kill.c undo.c macro.c input.c \
+                  callback.c terminal.c xmalloc.c xfree.c \
+                  history.c histsearch.c histexpand.c histfile.c nls.c search.c \
+                  shell.c savestring.c tilde.c text.c misc.c compat.c \
+                  mbutil.c gettimeofday.c colors.c parse-colors.c \
+                  robu-termcap.c
+
+READLINE_OBJS := $(patsubst %.c,$(READLINE_BUILD_DIR)/%.c.o,$(READLINE_SRCS))
+
+$(READLINE_BUILD_DIR)/%.c.o: $(READLINE_DIR)/%.c mlibc
+	@mkdir -p $(@D)
+	@[ -L $(READLINE_DIR)/readline ] || ln -s . $(READLINE_DIR)/readline
+	$(CC) $(READLINE_CFLAGS) -c $< -o $@
+
+$(READLINE_BUILD_DIR)/libreadline.a: $(READLINE_OBJS)
+	$(AR) rcs $@ $(READLINE_OBJS)
+
+readline: $(READLINE_BUILD_DIR)/libreadline.a
+
+$(APPS_BUILD_DIR)/readlinetest/readlinetest.c.o: apps/readlinetest/readlinetest.c mlibc
+	@mkdir -p $(@D)
+	@[ -L $(READLINE_DIR)/readline ] || ln -s . $(READLINE_DIR)/readline
+	$(CC) $(MLIBC_APP_CFLAGS) -I$(READLINE_DIR) -c $< -o $@
+
+$(APPS_BUILD_DIR)/readlinetest/readlinetest: $(APPS_BUILD_DIR)/readlinetest/readlinetest.c.o $(READLINE_BUILD_DIR)/libreadline.a apps/link/readlinetest.ld
+	ld.lld -nostdlib -static -T apps/link/readlinetest.ld -e _start -o $@ \
+	    $(MLIBC_CRT_OBJS) $(APPS_BUILD_DIR)/readlinetest/readlinetest.c.o $(READLINE_BUILD_DIR)/libreadline.a $(MLIBC_LIBS)
+	$(STRIP) --strip-all $@
+
+readlinetest: $(APPS_BUILD_DIR)/readlinetest/readlinetest
+
 $(APPS_BUILD_DIR)/stub/stub.c.o: apps/stub/stub.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -290,6 +332,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/sigtest/sigtest \
                          $(APPS_BUILD_DIR)/consoletest/consoletest \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
+                         $(APPS_BUILD_DIR)/readlinetest/readlinetest \
                          $(APPS_BUILD_DIR)/hello_initsys/hello_initsys \
                          $(APPS_BUILD_DIR)/minibox/minibox \
                          $(APPS_BUILD_DIR)/sh/sh \
@@ -310,6 +353,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	cp $(APPS_BUILD_DIR)/sigtest/sigtest $(ROOTFS_STAGE)/sigtest
 	cp $(APPS_BUILD_DIR)/consoletest/consoletest $(ROOTFS_STAGE)/consoletest
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
+	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
 	cp $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(ROOTFS_STAGE)/hello_initsys
 	cp apps/hello_initsys/rc.conf $(ROOTFS_STAGE)/rc.conf
 	cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/minibox

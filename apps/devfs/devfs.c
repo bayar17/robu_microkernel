@@ -184,6 +184,47 @@ static void handle_read(msg_regs_t *m, tid_t from) {
         break;
     }
 }
+static void handle_peek(msg_regs_t *m, tid_t from) {
+    const vfs_read_req_t *req = (const vfs_read_req_t *)m;
+    uint64_t handle = req->handle;
+    vfs_read_reply_t *reply = (vfs_read_reply_t *)m;
+    if (!valid_handle(handle)) {
+        reply->status = VFS_ERR_BAD_HANDLE;
+        return;
+    }
+    switch ((dev_id_t)handle) {
+    case DEV_NULL:
+    case DEV_ZERO:
+    case DEV_RANDOM:
+        reply->status = 1;
+        break;
+    case DEV_CONSOLE: {
+        if (!console_fg_read_allowed(from)) {
+            reply->status = 0;
+            break;
+        }
+        if (console_local_head == console_local_tail) {
+            uint8_t kbuf[VFS_READ_MAX];
+            int got = devfs_kernel_console_read(kbuf, sizeof(kbuf));
+            if (got > 0) {
+                for (int i = 0; i < got; i++) {
+                    uint32_t next = (console_local_head + 1) % CONSOLE_LOCAL_BUF_SIZE;
+                    if (next == console_local_tail) {
+                        break;
+                    }
+                    console_local_buf[console_local_head] = kbuf[i];
+                    console_local_head = next;
+                }
+            }
+        }
+        reply->status = console_local_head != console_local_tail ? 1 : 0;
+        break;
+    }
+    default:
+        reply->status = 0;
+        break;
+    }
+}
 static void handle_write(msg_regs_t *m) {
     const vfs_write_req_t *req = (const vfs_write_req_t *)m;
     uint64_t handle = req->handle;
@@ -282,6 +323,9 @@ void _start(void) {
             break;
         case VFS_OP_READ:
             handle_read(&m, from);
+            break;
+        case VFS_OP_PEEK:
+            handle_peek(&m, from);
             break;
         case VFS_OP_WRITE:
             handle_write(&m);
