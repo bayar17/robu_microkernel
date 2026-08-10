@@ -118,7 +118,7 @@ static void seed_binary_copy(const char *rootfs_name, const char *ramfs_path) {
 
 void ramfs_bin_seed_init(void) {
     static const char *const real_names[] = {
-        "sh", "minibox", "file", "find", "mv"
+        "sh", "minibox", "file", "find", "mv", "am"
     };
     for (unsigned i = 0; i < sizeof(real_names) / sizeof(real_names[0]); i++) {
         char path[VFS_NAME_MAX] = "bin/";

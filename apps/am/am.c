@@ -7,6 +7,39 @@
 static tid_t devfs_tid = 0;
 static int64_t console_h = -1;
 
+static char frame_buf[4096];
+static int frame_len = 0;
+
+static void buf_str(const char *s) {
+    int l = 0;
+    while (s[l] && frame_len < (int)sizeof(frame_buf) - 1) {
+        frame_buf[frame_len++] = s[l++];
+    }
+}
+
+static void buf_num(uint64_t n) {
+    if (n == 0) { buf_str("0"); return; }
+    char buf[24], rev[24];
+    int r = 0, p = 0;
+    while (n > 0) { rev[r++] = '0' + (n % 10); n /= 10; }
+    while (r > 0) buf[p++] = rev[--r];
+    buf[p] = '\0';
+    buf_str(buf);
+}
+
+/* Transmite o frame inteiro em fatias respeitando VFS_WRITE_MAX (24 bytes por pacote) */
+static void flush_frame(void) {
+    int sent = 0;
+    while (sent < frame_len && console_h >= 0) {
+        int chunk = frame_len - sent;
+        if (chunk > VFS_WRITE_MAX) chunk = VFS_WRITE_MAX;
+        int64_t n = vfs_write(devfs_tid, (uint64_t)console_h, frame_buf + sent, (uint64_t)chunk);
+        if (n <= 0) break;
+        sent += (int)n;
+    }
+    frame_len = 0;
+}
+
 static int str_eq(const char *a, const char *b) {
     int i = 0;
     while (a[i] && b[i]) {
@@ -34,23 +67,6 @@ static int str_len(const char *s) {
     int l = 0;
     while (s[l]) l++;
     return l;
-}
-
-static void print_str(const char *s) {
-    uint64_t len = (uint64_t)str_len(s);
-    if (len > 0 && console_h >= 0) {
-        vfs_write(devfs_tid, (uint64_t)console_h, s, len);
-    }
-}
-
-static void print_num(uint64_t n) {
-    if (n == 0) { print_str("0"); return; }
-    char buf[24], rev[24];
-    int r = 0, p = 0;
-    while (n > 0) { rev[r++] = '0' + (n % 10); n /= 10; }
-    while (r > 0) buf[p++] = rev[--r];
-    buf[p] = '\0';
-    print_str(buf);
 }
 
 static void set_raw_mode(int enable) {
@@ -139,9 +155,10 @@ static void load_dir(const char *path) {
 }
 
 static void preview_file(const char *path, const char *filename) {
-    print_str("\033[2J\033[H\033[33m--- Content of ");
-    print_str(filename);
-    print_str(" ---\033[0m\r\n\r\n");
+    frame_len = 0;
+    buf_str("\033[2J\033[H\033[33m--- Content of ");
+    buf_str(filename);
+    buf_str(" ---\033[0m\r\n\r\n");
 
     char full[VFS_PATH_MAX];
     str_copy(full, path, sizeof(full));
@@ -157,17 +174,18 @@ static void preview_file(const char *path, const char *filename) {
             int64_t n = vfs_read(server, (uint64_t)h, buf, sizeof(buf) - 1);
             if (n > 0) {
                 buf[n] = '\0';
-                print_str((char*)buf);
+                buf_str((char*)buf);
             } else {
-                print_str("(Empty or unreadable file)\r\n");
+                buf_str("(Empty or unreadable file)\r\n");
             }
             vfs_close(server, (uint64_t)h);
         } else {
-            print_str("(Could not open file)\r\n");
+            buf_str("(Could not open file)\r\n");
         }
     }
 
-    print_str("\r\n\r\n\033[47;30m [ Press any key to return ] \033[0m\r\n");
+    buf_str("\r\n\r\n\033[47;30m [ Press any key to return ] \033[0m\r\n");
+    flush_frame();
 
     while (1) {
         int k = read_key();
@@ -182,6 +200,10 @@ void _start(void) {
     if (console_h < 0) ipc_exit(1);
 
     set_raw_mode(1);
+
+    frame_len = 0;
+    buf_str("\033[0m\033[2J\033[H");
+    flush_frame();
 
     char path[VFS_PATH_MAX] = "/";
     int selected = 0;
@@ -199,46 +221,59 @@ void _start(void) {
                 top_index = selected - VISIBLE_ROWS + 1;
             }
 
-            print_str("\033[0m\033[2J\033[H");
-            print_str("\033[44;37;1m --- Robu Native TUI File Manager --- \033[0m\r\n");
-            print_str("\033[36m Path:\033[0m ");
-            print_str(path);
-            print_str("  (");
-            print_num(entry_count);
-            print_str(" items)\r\n----------------------------------------\r\n");
+            frame_len = 0;
+            buf_str("\033[H");
+            buf_str("\033[44;37;1m --- Robu Native TUI File Manager --- \033[0m\033[K\r\n");
+            buf_str("\033[36m Path:\033[0m ");
+            buf_str(path);
+            buf_str("  (");
+            buf_num(entry_count);
+            buf_str(" items)\033[K\r\n----------------------------------------\033[K\r\n");
 
+            int lines_printed = 0;
             if (entry_count == 0) {
-                print_str("  (Empty directory)\r\n");
+                buf_str("  (Empty directory)\033[K\r\n");
+                lines_printed++;
             } else {
                 int end_index = top_index + VISIBLE_ROWS;
                 if (end_index > entry_count) end_index = entry_count;
 
                 if (top_index > 0) {
-                    print_str("  \033[33m^ ... (scroll up) ...\033[0m\r\n");
+                    buf_str("  \033[33m^ ... (scroll up) ...\033[0m\033[K\r\n");
+                    lines_printed++;
                 }
 
                 for (int i = top_index; i < end_index; i++) {
-                    if (i == selected) print_str("\033[47;30m> ");
-                    else print_str("  ");
+                    if (i == selected) buf_str("\033[47;30m> ");
+                    else buf_str("  ");
 
                     if (entries[i].is_dir) {
-                        print_str("\033[34m[DIR ]\033[0m ");
+                        buf_str("\033[34m[DIR ]\033[0m ");
                     } else {
-                        print_str("\033[32m[FILE]\033[0m ");
+                        buf_str("\033[32m[FILE]\033[0m ");
                     }
-                    print_str(entries[i].name);
+                    buf_str(entries[i].name);
 
-                    if (i == selected) print_str("\033[0m\r\n");
-                    else print_str("\r\n");
+                    if (i == selected) buf_str("\033[0m\033[K\r\n");
+                    else buf_str("\033[K\r\n");
+                    lines_printed++;
                 }
 
                 if (end_index < entry_count) {
-                    print_str("  \033[33mv ... (scroll down) ...\033[0m\r\n");
+                    buf_str("  \033[33mv ... (scroll down) ...\033[0m\033[K\r\n");
+                    lines_printed++;
                 }
             }
 
-            print_str("----------------------------------------\r\n");
-            print_str("[Up/Down/w/s] Nav   [p/Left] Parent   [ENTER/Right] Open   [q] Quit\r\n");
+            while (lines_printed < VISIBLE_ROWS + 1) {
+                buf_str("\033[K\r\n");
+                lines_printed++;
+            }
+
+            buf_str("----------------------------------------\033[K\r\n");
+            buf_str("[Up/Down/w/s] Nav   [p/Left] Parent   [ENTER/Right] Open   [q] Quit\033[K\r\n");
+
+            flush_frame();
             dirty = 0;
         }
 
@@ -309,7 +344,10 @@ void _start(void) {
         }
     }
 
-    print_str("\033[0m\033[2J\033[H");
+    frame_len = 0;
+    buf_str("\033[0m\033[2J\033[H");
+    flush_frame();
+
     set_raw_mode(0);
     vfs_close(devfs_tid, (uint64_t)console_h);
     ipc_exit(0);

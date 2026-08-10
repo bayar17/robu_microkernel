@@ -57,7 +57,6 @@ static int pending_pos = 0;
 
 static volatile uint16_t *const vga_mem = (volatile uint16_t *)0xB8000;
 
-/* 16-byte aligned framebuffers for native 128-bit MMIO vector transfers */
 static uint16_t live_screen[VGA_ROWS][VGA_COLS] __attribute__((aligned(16)));
 static uint16_t history_buf[VGA_HISTORY_MAX][VGA_COLS] __attribute__((aligned(16)));
 
@@ -78,7 +77,6 @@ static void update_cursor(void) {
     }
 }
 
-/* Render screen using native 128-bit MMIO memory copies (16 bytes / 8 cells per iteration) */
 static void render_screen(void) {
     if (view_offset == 0) {
         volatile uint128_t *dst128 = (volatile uint128_t *)vga_mem;
@@ -122,6 +120,10 @@ static void render_screen(void) {
     }
 }
 
+void arch_console_flush(void) {
+    render_screen();
+}
+
 static void live_scroll_up(void) {
     int hist_idx = history_head % VGA_HISTORY_MAX;
     for (int c = 0; c < VGA_COLS; c++) {
@@ -159,13 +161,11 @@ static void vga_clear(void) {
     render_screen();
 }
 
-/* Full ANSI SGR decoder (Foreground 30-37/39 and Background 40-47/49) */
 static void apply_ansi_color(int code) {
     switch (code) {
     case 0:  vga_attr = DEFAULT_ATTR; break;
     case 1:  vga_attr |= 0x08; break;
 
-    /* Foreground SGR Codes */
     case 30: vga_attr = (vga_attr & 0xF0) | 0x00; break;
     case 31: vga_attr = (vga_attr & 0xF0) | 0x0C; break;
     case 32: vga_attr = (vga_attr & 0xF0) | 0x0A; break;
@@ -176,7 +176,6 @@ static void apply_ansi_color(int code) {
     case 37: vga_attr = (vga_attr & 0xF0) | 0x0F; break;
     case 39: vga_attr = (vga_attr & 0xF0) | 0x07; break;
 
-    /* Background SGR Codes */
     case 40: vga_attr = (vga_attr & 0x8F) | 0x00; break;
     case 41: vga_attr = (vga_attr & 0x8F) | 0x40; break;
     case 42: vga_attr = (vga_attr & 0x8F) | 0x20; break;
@@ -204,8 +203,17 @@ static void vga_putc(char c) {
             if (c == 'm') ansi_state = 0;
             return;
         }
+        /* IMPLEMENTAÇÃO DE \033[K (Erase from Cursor to End of Line) */
+        if (c == 'K') {
+            for (int col = live_col; col < VGA_COLS; col++) {
+                live_screen[live_row][col] = (uint16_t)((vga_attr << 8) | ' ');
+            }
+            ansi_state = 0;
+            return;
+        }
         if (c == 'J' || c == 'H') {
             if (c == 'J') vga_clear();
+            else if (c == 'H') { live_row = 0; live_col = 0; }
             ansi_state = 0;
             return;
         }
@@ -218,41 +226,25 @@ static void vga_putc(char c) {
         if (++live_row >= VGA_ROWS) {
             live_scroll_up();
         }
-        if (view_offset == 0) render_screen();
         return;
     }
     if (c == '\r') {
         live_col = 0;
-        if (view_offset == 0) update_cursor();
         return;
     }
     if (c == '\b') {
         if (live_col > 0) live_col--;
         live_screen[live_row][live_col] = (uint16_t)((vga_attr << 8) | ' ');
-        if (view_offset == 0) {
-            vga_mem[live_row * VGA_COLS + live_col] = live_screen[live_row][live_col];
-            update_cursor();
-        }
         return;
     }
 
-    uint16_t val = (uint16_t)((vga_attr << 8) | (uint8_t)c);
-    live_screen[live_row][live_col] = val;
-    
-    if (view_offset == 0) {
-        vga_mem[live_row * VGA_COLS + live_col] = val;
-    }
+    live_screen[live_row][live_col] = (uint16_t)((vga_attr << 8) | (uint8_t)c);
 
     if (++live_col >= VGA_COLS) {
         live_col = 0;
         if (++live_row >= VGA_ROWS) {
             live_scroll_up();
-            if (view_offset == 0) render_screen();
-        } else {
-            if (view_offset == 0) update_cursor();
         }
-    } else {
-        if (view_offset == 0) update_cursor();
     }
 }
 
@@ -344,10 +336,13 @@ void arch_console_init(void) {
 }
 
 void arch_console_putc(char c) {
-    if (c == '\n') {
-        serial_putc('\r');
+    /* Suprime a inundação do log serial quando um app TUI está ativo */
+    if (!console_raw_mode) {
+        if (c == '\n') {
+            serial_putc('\r');
+        }
+        serial_putc(c);
     }
-    serial_putc(c);
     vga_putc(c);
 }
 

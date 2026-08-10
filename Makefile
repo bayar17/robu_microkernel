@@ -291,6 +291,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/consoletest/consoletest \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
                          $(APPS_BUILD_DIR)/am/am \
+                         $(APPS_BUILD_DIR)/top/top \
                          $(APPS_BUILD_DIR)/hello_initsys/hello_initsys \
                          $(APPS_BUILD_DIR)/minibox/minibox \
                          $(APPS_BUILD_DIR)/sh/sh \
@@ -312,6 +313,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	cp $(APPS_BUILD_DIR)/consoletest/consoletest $(ROOTFS_STAGE)/consoletest
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
 	cp $(APPS_BUILD_DIR)/am/am $(ROOTFS_STAGE)/am
+	cp $(APPS_BUILD_DIR)/top/top $(ROOTFS_STAGE)/top
 	cp $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(ROOTFS_STAGE)/hello_initsys
 	cp apps/hello_initsys/rc.conf $(ROOTFS_STAGE)/rc.conf
 	cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/minibox
@@ -368,4 +370,14 @@ $(APPS_BUILD_DIR)/am/am.c.o: apps/am/am.c
 $(APPS_BUILD_DIR)/am/am: $(APPS_BUILD_DIR)/am/am.c.o apps/link/am.ld
 	$(LD) $(APP_LDFLAGS) -T apps/link/am.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/am/am.c.o
+	$(STRIP) --strip-all $@
+
+# --- TUI TOP BUILD RULES (NATIVE FREESTANDING) ---
+$(APPS_BUILD_DIR)/top/top.c.o: apps/top/top.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/top/top: $(APPS_BUILD_DIR)/top/top.c.o apps/link/top.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/top.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/top/top.c.o
 	$(STRIP) --strip-all $@

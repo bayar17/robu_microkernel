@@ -291,6 +291,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/consoletest/consoletest \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
                          $(APPS_BUILD_DIR)/am/am \
+                         $(APPS_BUILD_DIR)/top/top \
                          $(APPS_BUILD_DIR)/hello_initsys/hello_initsys \
                          $(APPS_BUILD_DIR)/minibox/minibox \
                          $(APPS_BUILD_DIR)/sh/sh \
@@ -359,12 +360,23 @@ run: $(BUILD_DIR)/robu_kernel.iso
 APP_BINS := $(APPS_BUILD_DIR)/procfs/procfs $(APPS_BUILD_DIR)/sysfs/sysfs \
             $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(APPS_BUILD_DIR)/minibox/minibox \
 
-# --- TUI AM BUILD RULES ---
-$(APPS_BUILD_DIR)/am/am.c.o: apps/am/am.c mlibc
+
+# --- TUI AM BUILD RULES (NATIVE FREESTANDING) ---
+$(APPS_BUILD_DIR)/am/am.c.o: apps/am/am.c
 	@mkdir -p $(@D)
-	$(CC) $(MLIBC_APP_CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(APPS_BUILD_DIR)/am/am: $(APPS_BUILD_DIR)/am/am.c.o apps/link/am.ld
-	ld.lld -nostdlib -static -T apps/link/am.ld -e _start -o $@ \
-	    $(MLIBC_CRT_OBJS) $(APPS_BUILD_DIR)/am/am.c.o $(MLIBC_LIBS)
+	$(LD) $(APP_LDFLAGS) -T apps/link/am.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/am/am.c.o
+	$(STRIP) --strip-all $@
+
+# --- TUI TOP BUILD RULES (NATIVE FREESTANDING) ---
+$(APPS_BUILD_DIR)/top/top.c.o: apps/top/top.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/top/top: $(APPS_BUILD_DIR)/top/top.c.o apps/link/top.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/top.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/top/top.c.o
 	$(STRIP) --strip-all $@
