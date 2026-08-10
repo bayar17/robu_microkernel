@@ -15,6 +15,7 @@
 #define VFS_OP_UNLINK  9
 #define VFS_OP_SYMLINK 10
 #define VFS_OP_QUIESCE 11
+#define VFS_OP_PEEK    12
 #define VFS_ERR_NOT_FOUND     (-1)
 #define VFS_ERR_BAD_HANDLE    (-2)
 #define VFS_ERR_NOT_SUPPORTED (-3)
@@ -172,6 +173,17 @@ static inline int64_t vfs_read(tid_t server, uint64_t handle, void *buf, uint64_
             out[i] = reply->data[i];
         }
     }
+    return reply->status;
+}
+static inline int64_t vfs_peek(tid_t server, uint64_t handle) {
+    msg_regs_t m;
+    vfs_read_req_t *req = (vfs_read_req_t *)&m;
+    req->op = VFS_OP_PEEK;
+    req->handle = handle;
+    req->len = 0;
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_read_reply_t *reply = (vfs_read_reply_t *)&m;
     return reply->status;
 }
 static inline int64_t vfs_write(tid_t server, uint64_t handle, const void *buf, uint64_t len) {

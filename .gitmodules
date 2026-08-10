@@ -10,3 +10,9 @@
 [submodule "apps/uACPI"]
 	path = apps/uACPI
 	url = https://github.com/uACPI/uACPI.git
+[submodule "apps/readline"]
+	path = apps/readline
+	url = https://git.savannah.gnu.org/git/readline.git
+[submodule "apps/bash"]
+	path = apps/bash
+	url = https://git.savannah.gnu.org/git/bash.git

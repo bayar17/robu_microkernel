@@ -140,6 +140,7 @@ static vaddr_t map_segments_and_stack(paddr_t as, const elf_image_t *img,
                 kprintf("[elf] out of physical memory loading '%s'\n", name);
                 return 0;
             }
+            memset((void *)frame, 0, PAGE_SIZE_4K);
             arch_vm_map_page(as, page_va, frame, seg->prot);
             vaddr_t seg_data_lo = seg->vaddr;
             vaddr_t seg_data_hi = seg->vaddr + seg->filesz;
@@ -164,6 +165,7 @@ static vaddr_t map_segments_and_stack(paddr_t as, const elf_image_t *img,
             kprintf("[elf] out of physical memory allocating '%s's stack\n", name);
             return 0;
         }
+        memset((void *)stack_frame, 0, PAGE_SIZE_4K);
         arch_vm_map_page(as, stack_base + i * PAGE_SIZE_4K, stack_frame,
                          VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER);
     }

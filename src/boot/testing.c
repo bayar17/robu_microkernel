@@ -329,6 +329,13 @@ void consoletest_init(void) {
     toybox_spawn("consoletest", 1, (const char *const[]){ "consoletest" }, 9);
 }
 
+void readlinetest_init(void) {
+    if (!cmdline_get("readlinetest")) {
+        return;
+    }
+    toybox_spawn("readlinetest", 1, (const char *const[]){ "readlinetest" }, 9);
+}
+
 void toybox_sh_c_init(void) {
     const char *cmd = cmdline_get("toybox_sh_c");
     if (!cmd) {

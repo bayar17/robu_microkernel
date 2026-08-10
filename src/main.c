@@ -185,6 +185,7 @@ void kmain(void) {
     spawntest_init();
     sigtest_init();
     consoletest_init();
+    readlinetest_init();
     toybox_sh_c_init();
 
     scheduler_ready = 1;
