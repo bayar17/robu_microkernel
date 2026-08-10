@@ -165,17 +165,17 @@ void ramfs_sbin_seed_init(void) {
     kprintf("[boot] /sbin seed: reboot, halt, shutdown copied into ramfs\n");
 }
 
-void ramfs_etc_seed_init(void) {
+static void seed_etc_file(const char *rootfs_name, const char *ramfs_path) {
     const uint8_t *start, *end;
-    if (rootfs_lookup("rc.conf", &start, &end) != 0) {
-        kprintf("[boot] /etc seed: no 'rc.conf' entry in rootfs, skipping\n");
+    if (rootfs_lookup(rootfs_name, &start, &end) != 0) {
+        kprintf("[boot] /etc seed: no '%s' entry in rootfs, skipping\n", rootfs_name);
         return;
     }
     uint64_t sz = (uint64_t)(end - start);
 
-    int64_t h = vfs_open(ramfs_tid(), "etc/rc.conf", VFS_O_CREAT | VFS_O_TRUNC);
+    int64_t h = vfs_open(ramfs_tid(), ramfs_path, VFS_O_CREAT | VFS_O_TRUNC);
     if (h < 0) {
-        kprintf("[boot] /etc seed: vfs_open('etc/rc.conf') failed rc=%ld\n", h);
+        kprintf("[boot] /etc seed: vfs_open('%s') failed rc=%ld\n", ramfs_path, h);
         return;
     }
     uint64_t off = 0;
@@ -186,12 +186,17 @@ void ramfs_etc_seed_init(void) {
         }
         int64_t n = vfs_write(ramfs_tid(), (uint64_t)h, start + off, chunk);
         if (n <= 0) {
-            kprintf("[boot] /etc seed: vfs_write('etc/rc.conf') failed at off=%lu\n", off);
+            kprintf("[boot] /etc seed: vfs_write('%s') failed at off=%lu\n", ramfs_path, off);
             vfs_close(ramfs_tid(), (uint64_t)h);
             return;
         }
         off += (uint64_t)n;
     }
     vfs_close(ramfs_tid(), (uint64_t)h);
-    kprintf("[boot] /etc seed: rc.conf (%lu bytes) copied into ramfs\n", sz);
+    kprintf("[boot] /etc seed: %s (%lu bytes) copied into ramfs\n", ramfs_path, sz);
+}
+
+void ramfs_etc_seed_init(void) {
+    seed_etc_file("rc.conf", "etc/rc.conf");
+    seed_etc_file("passwd", "etc/passwd");
 }

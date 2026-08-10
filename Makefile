@@ -337,7 +337,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/minibox/minibox \
                          $(APPS_BUILD_DIR)/sh/sh \
                          $(APPS_BUILD_DIR)/stub/stub \
-                         apps/hello_initsys/rc.conf
+                         apps/hello_initsys/rc.conf etc/passwd
 	rm -rf $(ROOTFS_STAGE)
 	mkdir -p $(ROOTFS_STAGE)
 	cp $(APPS_BUILD_DIR)/devfs/devfs $(ROOTFS_STAGE)/devfs
@@ -356,6 +356,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
 	cp $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(ROOTFS_STAGE)/hello_initsys
 	cp apps/hello_initsys/rc.conf $(ROOTFS_STAGE)/rc.conf
+	cp etc/passwd $(ROOTFS_STAGE)/passwd
 	cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/minibox
 	cp $(APPS_BUILD_DIR)/sh/sh $(ROOTFS_STAGE)/sh
 	for n in $(ROOTFS_MINIBOX_ALIASES); do cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/$$n; done

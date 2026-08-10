@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -10,6 +11,11 @@ extern int __libc_spawn(const char *name, char *const argv[], char *const envp[]
 
 int main(int argc, char **argv) {
     printf("[hello_initsys] init starting\n");
+
+    setenv("HOME", "/var/root", 1);
+    setenv("USER", "root", 1);
+    setenv("LOGNAME", "root", 1);
+    setenv("SHELL", "/bin/sh", 1);
 
     static char rc_shell[64] = "sh";
     int rc_respawn = 1;

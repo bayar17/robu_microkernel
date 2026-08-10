@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -10,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <bits/winsize.h>
 #include <unistd.h>
+#include <pwd.h>
 #define ROBU_TIOCGPGRP 0x540F
 #define ROBU_TIOCSPGRP 0x5410
 #define ROBU_TIOCGWINSZ 0x5413
@@ -210,6 +212,31 @@ static void termios_pgrp_test(void) {
     printf("pgrp test: tcgetpgrp=%d self=%d (expect equal)\n", fg_read, (int)me);
 }
 
+static void root_account_test(void) {
+    printf("root account test: getuid=%d geteuid=%d (expect both 0)\n",
+           (int)getuid(), (int)geteuid());
+
+    const char *home = getenv("HOME");
+    const char *user = getenv("USER");
+    printf("root account test: HOME=%s USER=%s (expect /var/root, root)\n",
+           home ? home : "(null)", user ? user : "(null)");
+
+    struct passwd *pw = getpwuid(getuid());
+    if (!pw) {
+        printf("root account test: getpwuid(0) failed: %s\n", strerror(errno));
+    } else {
+        printf("root account test: pw_name=%s pw_dir=%s pw_shell=%s (expect root, /var/root, /bin/sh)\n",
+               pw->pw_name, pw->pw_dir, pw->pw_shell);
+    }
+
+    struct stat st;
+    if (stat("/var/root", &st) != 0) {
+        printf("root account test: stat(/var/root) failed: %s\n", strerror(errno));
+    } else {
+        printf("root account test: /var/root exists, is_dir=%d\n", S_ISDIR(st.st_mode));
+    }
+}
+
 int main(int argc, char **argv) {
     printf("hello from mlibc on robu\n");
     for (int i = 0; i < argc; i++) {
@@ -264,6 +291,7 @@ int main(int argc, char **argv) {
     exec_test();
     sigaction_test();
     termios_pgrp_test();
+    root_account_test();
 
     printf("mlibc-hello: all checks done\n");
     return 0;
