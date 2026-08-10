@@ -4,6 +4,7 @@
 #include "portio.h"
 
 #define COM1 0x3F8
+
 static void serial_init(void) {
     outb(COM1 + 1, 0x00);
     outb(COM1 + 3, 0x80);
@@ -48,6 +49,204 @@ static int console_raw_mode = 0;
 static char pending_bytes[4];
 static int pending_len = 0;
 static int pending_pos = 0;
+
+#define VGA_COLS 80
+#define VGA_ROWS 25
+#define VGA_HISTORY_MAX 200
+#define DEFAULT_ATTR 0x07
+
+static volatile uint16_t *const vga_mem = (volatile uint16_t *)0xB8000;
+
+static uint16_t live_screen[VGA_ROWS][VGA_COLS] __attribute__((aligned(16)));
+static uint16_t history_buf[VGA_HISTORY_MAX][VGA_COLS] __attribute__((aligned(16)));
+
+static int live_row = 0;
+static int live_col = 0;
+static int history_head = 0; 
+static int view_offset = 0;
+
+static uint8_t vga_attr = DEFAULT_ATTR;
+static int ansi_state = 0;
+static int ansi_param = 0;
+
+static void update_cursor(void) {
+    if (view_offset == 0) {
+        uint16_t pos = (uint16_t)(live_row * VGA_COLS + live_col);
+        outb(0x3D4, 0x0F); outb(0x3D5, (uint8_t)(pos & 0xFF));
+        outb(0x3D4, 0x0E); outb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+    }
+}
+
+static void render_screen(void) {
+    if (view_offset == 0) {
+        volatile uint128_t *dst128 = (volatile uint128_t *)vga_mem;
+        const uint128_t *src128 = (const uint128_t *)live_screen;
+        for (int i = 0; i < (VGA_ROWS * VGA_COLS * 2) / 16; i++) {
+            dst128[i] = src128[i];
+        }
+        update_cursor();
+        return;
+    }
+
+    int total_history = history_head < VGA_HISTORY_MAX ? history_head : VGA_HISTORY_MAX;
+    if (view_offset > total_history) view_offset = total_history;
+    if (view_offset < 0) view_offset = 0;
+
+    for (int r = 0; r < VGA_ROWS; r++) {
+        int target_line = (total_history + r) - view_offset;
+        volatile uint128_t *dst128 = (volatile uint128_t *)(vga_mem + r * VGA_COLS);
+
+        if (target_line < 0) {
+            uint16_t blank[VGA_COLS] __attribute__((aligned(16)));
+            for (int c = 0; c < VGA_COLS; c++) blank[c] = (uint16_t)((vga_attr << 8) | ' ');
+            const uint128_t *b128 = (const uint128_t *)blank;
+            for (int i = 0; i < (VGA_COLS * 2) / 16; i++) dst128[i] = b128[i];
+        } else if (target_line < total_history) {
+            int hist_idx = (history_head - total_history + target_line + VGA_HISTORY_MAX) % VGA_HISTORY_MAX;
+            const uint128_t *src128 = (const uint128_t *)history_buf[hist_idx];
+            for (int i = 0; i < (VGA_COLS * 2) / 16; i++) dst128[i] = src128[i];
+        } else {
+            int live_r = target_line - total_history;
+            if (live_r < VGA_ROWS) {
+                const uint128_t *src128 = (const uint128_t *)live_screen[live_r];
+                for (int i = 0; i < (VGA_COLS * 2) / 16; i++) dst128[i] = src128[i];
+            } else {
+                uint16_t blank[VGA_COLS] __attribute__((aligned(16)));
+                for (int c = 0; c < VGA_COLS; c++) blank[c] = (uint16_t)((vga_attr << 8) | ' ');
+                const uint128_t *b128 = (const uint128_t *)blank;
+                for (int i = 0; i < (VGA_COLS * 2) / 16; i++) dst128[i] = b128[i];
+            }
+        }
+    }
+}
+
+void arch_console_flush(void) {
+    render_screen();
+}
+
+static void live_scroll_up(void) {
+    int hist_idx = history_head % VGA_HISTORY_MAX;
+    for (int c = 0; c < VGA_COLS; c++) {
+        history_buf[hist_idx][c] = live_screen[0][c];
+    }
+    history_head++;
+
+    for (int r = 1; r < VGA_ROWS; r++) {
+        for (int c = 0; c < VGA_COLS; c++) {
+            live_screen[r - 1][c] = live_screen[r][c];
+        }
+    }
+    for (int c = 0; c < VGA_COLS; c++) {
+        live_screen[VGA_ROWS - 1][c] = (uint16_t)((vga_attr << 8) | ' ');
+    }
+    live_row = VGA_ROWS - 1;
+}
+
+static void vga_clear(void) {
+    vga_attr = DEFAULT_ATTR;
+    for (int r = 0; r < VGA_ROWS; r++) {
+        for (int c = 0; c < VGA_COLS; c++) {
+            live_screen[r][c] = (uint16_t)((vga_attr << 8) | ' ');
+        }
+    }
+    for (int r = 0; r < VGA_HISTORY_MAX; r++) {
+        for (int c = 0; c < VGA_COLS; c++) {
+            history_buf[r][c] = (uint16_t)((vga_attr << 8) | ' ');
+        }
+    }
+    history_head = 0;
+    live_row = 0;
+    live_col = 0;
+    view_offset = 0;
+    render_screen();
+}
+
+static void apply_ansi_color(int code) {
+    switch (code) {
+    case 0:  vga_attr = DEFAULT_ATTR; break;
+    case 1:  vga_attr |= 0x08; break;
+
+    case 30: vga_attr = (vga_attr & 0xF0) | 0x00; break;
+    case 31: vga_attr = (vga_attr & 0xF0) | 0x0C; break;
+    case 32: vga_attr = (vga_attr & 0xF0) | 0x0A; break;
+    case 33: vga_attr = (vga_attr & 0xF0) | 0x0E; break;
+    case 34: vga_attr = (vga_attr & 0xF0) | 0x09; break;
+    case 35: vga_attr = (vga_attr & 0xF0) | 0x0D; break;
+    case 36: vga_attr = (vga_attr & 0xF0) | 0x0B; break;
+    case 37: vga_attr = (vga_attr & 0xF0) | 0x0F; break;
+    case 39: vga_attr = (vga_attr & 0xF0) | 0x07; break;
+
+    case 40: vga_attr = (vga_attr & 0x8F) | 0x00; break;
+    case 41: vga_attr = (vga_attr & 0x8F) | 0x40; break;
+    case 42: vga_attr = (vga_attr & 0x8F) | 0x20; break;
+    case 43: vga_attr = (vga_attr & 0x8F) | 0x60; break;
+    case 44: vga_attr = (vga_attr & 0x8F) | 0x10; break;
+    case 45: vga_attr = (vga_attr & 0x8F) | 0x50; break;
+    case 46: vga_attr = (vga_attr & 0x8F) | 0x30; break;
+    case 47: vga_attr = (vga_attr & 0x8F) | 0x70; break;
+    case 49: vga_attr = (vga_attr & 0x8F) | 0x00; break;
+    default: break;
+    }
+}
+
+static void vga_putc(char c) {
+    if (ansi_state == 0) {
+        if (c == '\033') { ansi_state = 1; return; }
+    } else if (ansi_state == 1) {
+        if (c == '[') { ansi_state = 2; ansi_param = 0; return; }
+        ansi_state = 0;
+    } else if (ansi_state == 2) {
+        if (c >= '0' && c <= '9') { ansi_param = ansi_param * 10 + (c - '0'); return; }
+        if (c == ';' || c == 'm') {
+            apply_ansi_color(ansi_param);
+            ansi_param = 0;
+            if (c == 'm') ansi_state = 0;
+            return;
+        }
+        /* IMPLEMENTAÇÃO DE \033[K (Erase from Cursor to End of Line) */
+        if (c == 'K') {
+            for (int col = live_col; col < VGA_COLS; col++) {
+                live_screen[live_row][col] = (uint16_t)((vga_attr << 8) | ' ');
+            }
+            ansi_state = 0;
+            return;
+        }
+        if (c == 'J' || c == 'H') {
+            if (c == 'J') vga_clear();
+            else if (c == 'H') { live_row = 0; live_col = 0; }
+            ansi_state = 0;
+            return;
+        }
+        ansi_state = 0;
+        return;
+    }
+
+    if (c == '\n') {
+        live_col = 0;
+        if (++live_row >= VGA_ROWS) {
+            live_scroll_up();
+        }
+        return;
+    }
+    if (c == '\r') {
+        live_col = 0;
+        return;
+    }
+    if (c == '\b') {
+        if (live_col > 0) live_col--;
+        live_screen[live_row][live_col] = (uint16_t)((vga_attr << 8) | ' ');
+        return;
+    }
+
+    live_screen[live_row][live_col] = (uint16_t)((vga_attr << 8) | (uint8_t)c);
+
+    if (++live_col >= VGA_COLS) {
+        live_col = 0;
+        if (++live_row >= VGA_ROWS) {
+            live_scroll_up();
+        }
+    }
+}
 
 static int extended_key_to_ansi(uint8_t scancode) {
     switch (scancode) {
@@ -99,128 +298,36 @@ static int ps2_getc(void) {
     }
     if (extended_pending) {
         extended_pending = 0;
+
+        if (scancode == 0x49 || (shift_pressed && scancode == 0x48)) {
+            view_offset += 5;
+            render_screen();
+            return -1;
+        }
+        if (scancode == 0x51 || (shift_pressed && scancode == 0x50)) {
+            view_offset -= 5;
+            if (view_offset < 0) view_offset = 0;
+            render_screen();
+            return -1;
+        }
+
         if (console_raw_mode && extended_key_to_ansi(scancode)) {
             pending_pos = 1;
             return (int)(uint8_t)pending_bytes[0];
         }
         return -1;
     }
+
+    if (view_offset != 0) {
+        view_offset = 0;
+        render_screen();
+    }
+
     if (scancode < 128) {
         char c = shift_pressed ? scancode_ascii_shift[scancode] : scancode_ascii[scancode];
         if (c) return (int)(uint8_t)c;
     }
     return -1;
-}
-
-#define VGA_COLS 80
-#define VGA_ROWS 25
-#define DEFAULT_ATTR 0x07
-
-static volatile uint16_t *const vga_mem = (volatile uint16_t *)0xB8000;
-static int vga_row;
-static int vga_col;
-static uint8_t vga_attr = DEFAULT_ATTR;
-
-static int ansi_state = 0;
-static int ansi_param = 0;
-
-static void vga_update_cursor(void) {
-    uint16_t pos = (uint16_t)(vga_row * VGA_COLS + vga_col);
-    outb(0x3D4, 0x0F);
-    outb(0x3D5, (uint8_t)(pos & 0xFF));
-    outb(0x3D4, 0x0E);
-    outb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
-}
-
-static void vga_scroll(void) {
-    for (int r = 1; r < VGA_ROWS; r++) {
-        for (int c = 0; c < VGA_COLS; c++) {
-            vga_mem[(r - 1) * VGA_COLS + c] = vga_mem[r * VGA_COLS + c];
-        }
-    }
-    for (int c = 0; c < VGA_COLS; c++) {
-        vga_mem[(VGA_ROWS - 1) * VGA_COLS + c] = (uint16_t)((vga_attr << 8) | ' ');
-    }
-    vga_row = VGA_ROWS - 1;
-}
-
-static void vga_clear(void) {
-    for (int i = 0; i < VGA_COLS * VGA_ROWS; i++) {
-        vga_mem[i] = (uint16_t)((vga_attr << 8) | ' ');
-    }
-    vga_row = 0;
-    vga_col = 0;
-    vga_update_cursor();
-}
-
-static void apply_ansi_color(int code) {
-    switch (code) {
-    case 0:  vga_attr = 0x07; break;
-    case 1:  vga_attr |= 0x08; break;
-    case 30: vga_attr = (vga_attr & 0xF0) | 0x00; break;
-    case 31: vga_attr = (vga_attr & 0xF0) | 0x0C; break;
-    case 32: vga_attr = (vga_attr & 0xF0) | 0x0A; break;
-    case 33: vga_attr = (vga_attr & 0xF0) | 0x0E; break;
-    case 34: vga_attr = (vga_attr & 0xF0) | 0x09; break;
-    case 35: vga_attr = (vga_attr & 0xF0) | 0x0D; break;
-    case 36: vga_attr = (vga_attr & 0xF0) | 0x0B; break;
-    case 37: vga_attr = (vga_attr & 0xF0) | 0x0F; break;
-    default: break;
-    }
-}
-
-static void vga_putc(char c) {
-    if (ansi_state == 0) {
-        if (c == '\033') {
-            ansi_state = 1;
-            return;
-        }
-    } else if (ansi_state == 1) {
-        if (c == '[') {
-            ansi_state = 2;
-            ansi_param = 0;
-            return;
-        }
-        ansi_state = 0;
-    } else if (ansi_state == 2) {
-        if (c >= '0' && c <= '9') {
-            ansi_param = ansi_param * 10 + (c - '0');
-            return;
-        }
-        if (c == ';' || c == 'm') {
-            apply_ansi_color(ansi_param);
-            ansi_param = 0;
-            if (c == 'm') {
-                ansi_state = 0;
-            }
-            return;
-        }
-        ansi_state = 0;
-        return;
-    }
-
-    if (c == '\n') {
-        vga_col = 0;
-        if (++vga_row >= VGA_ROWS) {
-            vga_scroll();
-        }
-        vga_update_cursor();
-        return;
-    }
-    if (c == '\r') {
-        vga_col = 0;
-        vga_update_cursor();
-        return;
-    }
-
-    vga_mem[vga_row * VGA_COLS + vga_col] = (uint16_t)((vga_attr << 8) | (uint8_t)c);
-    if (++vga_col >= VGA_COLS) {
-        vga_col = 0;
-        if (++vga_row >= VGA_ROWS) {
-            vga_scroll();
-        }
-    }
-    vga_update_cursor();
 }
 
 void arch_console_init(void) {
@@ -229,10 +336,13 @@ void arch_console_init(void) {
 }
 
 void arch_console_putc(char c) {
-    if (c == '\n') {
-        serial_putc('\r');
+    /* Suprime a inundação do log serial quando um app TUI está ativo */
+    if (!console_raw_mode) {
+        if (c == '\n') {
+            serial_putc('\r');
+        }
+        serial_putc(c);
     }
-    serial_putc(c);
     vga_putc(c);
 }
 
@@ -261,6 +371,9 @@ static void ring_push_locked(char c) {
 
 void arch_console_set_raw_mode(int enable) {
     console_raw_mode = enable ? 1 : 0;
+    if (!enable) {
+        vga_attr = DEFAULT_ATTR;
+    }
 }
 
 int arch_console_get_raw_mode(void) {

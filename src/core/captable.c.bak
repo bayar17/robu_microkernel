@@ -12,18 +12,9 @@ static kcap_t *kcap_table = NULL;
 static uint32_t kcap_capacity = 0;
 
 int kcap_grant(tid_t owner, cap_kind_t kind, uint64_t addr, uint64_t size) {
-    if (kcap_count >= kcap_capacity) {
-        uint32_t new_cap = kcap_capacity == 0 ? 128 : kcap_capacity * 2;
-        kcap_t *new_table = (kcap_t*)untyped_alloc(new_cap * sizeof(kcap_t));
-        if (!new_table) return -1;
-        if (kcap_table) {
-            for (uint32_t i = 0; i < kcap_count; i++) new_table[i] = kcap_table[i];
-        }
-        kcap_table = new_table;
-        kcap_capacity = new_cap;
+    if (kcap_count >= MAX_KCAPS) {
+        return -1;
     }
-    kcap_table[kcap_count].kind = kind;
-
     kcap_table[kcap_count].kind = kind;
     kcap_table[kcap_count].owner = owner;
     kcap_table[kcap_count].addr = addr;

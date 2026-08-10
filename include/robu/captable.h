@@ -1,6 +1,7 @@
 #ifndef ROBU_CAPTABLE_H
 #define ROBU_CAPTABLE_H
 #include "robu/types.h"
+
 typedef enum {
     CAP_KIND_UNTYPED = 0,
     CAP_KIND_FRAME,
@@ -10,6 +11,7 @@ typedef enum {
     CAP_KIND_TIMER,
     CAP_KIND_INVALID,
 } cap_kind_t;
+
 typedef struct {
     cap_kind_t kind;
     tid_t owner;
@@ -17,7 +19,8 @@ typedef struct {
     uint64_t size;
     uint64_t mapped_va;
 } kcap_t;
-#define MAX_KCAPS 40
+
+// Removemos a macro limitante MAX_KCAPS 40!
 int kcap_grant(tid_t owner, cap_kind_t kind, uint64_t addr, uint64_t size);
 uint32_t kcap_next_slot(void);
 int cap_retype(tid_t caller, uint32_t untyped_slot, uint32_t kind,

@@ -2,11 +2,13 @@
 #include "robu/kprintf.h"
 #include "robu/spinlock.h"
 #include "robu/arch.h"
+
 static spinlock_t console_lock = SPINLOCK_INIT;
 typedef __builtin_va_list va_list;
 #define va_start(v, l) __builtin_va_start(v, l)
 #define va_arg(v, t)   __builtin_va_arg(v, t)
 #define va_end(v)      __builtin_va_end(v)
+
 static void emit_udec(uint64_t v) {
     char buf[20];
     int i = 0;
@@ -22,6 +24,7 @@ static void emit_udec(uint64_t v) {
         arch_console_putc(buf[i]);
     }
 }
+
 static void emit_hex(uint64_t v, int min_digits) {
     static const char digits[] = "0123456789abcdef";
     char buf[16];
@@ -40,6 +43,7 @@ static void emit_hex(uint64_t v, int min_digits) {
         arch_console_putc(buf[i]);
     }
 }
+
 static void emit_str(const char *s) {
     if (!s) {
         s = "(null)";
@@ -48,23 +52,29 @@ static void emit_str(const char *s) {
         arch_console_putc(*s++);
     }
 }
+
 void kputs(const char *s) {
     uint64_t flags = arch_irq_save();
     spin_lock(&console_lock);
     emit_str(s);
     arch_console_putc('\n');
+    arch_console_flush();
     spin_unlock(&console_lock);
     arch_irq_restore(flags);
 }
+
 void kwrite(const uint8_t *buf, uint64_t len) {
     uint64_t flags = arch_irq_save();
     spin_lock(&console_lock);
     for (uint64_t i = 0; i < len; i++) {
         arch_console_putc((char)buf[i]);
     }
+    /* Atomic batch flush: transfers RAM framebuffer to MMIO 0xB8000 via 128-bit instructions */
+    arch_console_flush();
     spin_unlock(&console_lock);
     arch_irq_restore(flags);
 }
+
 void kprintf(const char *fmt, ...) {
     uint64_t flags = arch_irq_save();
     spin_lock(&console_lock);
@@ -112,6 +122,7 @@ void kprintf(const char *fmt, ...) {
             break;
         case '\0':
             va_end(ap);
+            arch_console_flush();
             spin_unlock(&console_lock);
             arch_irq_restore(flags);
             return;
@@ -122,6 +133,7 @@ void kprintf(const char *fmt, ...) {
         }
     }
     va_end(ap);
+    arch_console_flush();
     spin_unlock(&console_lock);
     arch_irq_restore(flags);
 }
