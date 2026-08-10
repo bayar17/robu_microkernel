@@ -298,6 +298,26 @@ $(READLINE_BUILD_DIR)/libreadline.a: $(READLINE_OBJS)
 
 readline: $(READLINE_BUILD_DIR)/libreadline.a
 
+BASH_DIR := apps/bash
+BASH_BUILD_DIR := $(APPS_BUILD_DIR)/bash
+
+$(BASH_DIR)/config.h: $(BASH_DIR)/robu.cache mlibc readline
+	cd $(BASH_DIR) && CC="clang --target=x86_64-linux-gnu" \
+	    CC_FOR_BUILD=clang \
+	    CFLAGS="-ffreestanding -fPIC -fno-stack-protector -mno-red-zone -D_GNU_SOURCE -nostdinc -isystem $$(clang --print-resource-dir)/include -isystem $(MLIBC_SYSROOT)/usr/include" \
+	    CPPFLAGS="-I$(abspath $(READLINE_DIR))" \
+	    ./configure --host=x86_64-linux-gnu --build=x86_64-pc-linux-gnu \
+	        --cache-file=$(abspath $(BASH_DIR)/robu.cache) \
+	        --without-bash-malloc --enable-readline --enable-job-control \
+	        --disable-nls --disable-rpath --without-libiconv-prefix --without-libintl-prefix
+
+bash-configure: $(BASH_DIR)/config.h
+
+bash-build: $(BASH_DIR)/config.h
+	touch $(BASH_DIR)/configure.ac $(BASH_DIR)/aclocal.m4 $(BASH_DIR)/config.h.in
+	touch $(BASH_DIR)/configure
+	$(MAKE) -C $(BASH_DIR)
+
 $(APPS_BUILD_DIR)/readlinetest/readlinetest.c.o: apps/readlinetest/readlinetest.c mlibc
 	@mkdir -p $(@D)
 	@[ -L $(READLINE_DIR)/readline ] || ln -s . $(READLINE_DIR)/readline
