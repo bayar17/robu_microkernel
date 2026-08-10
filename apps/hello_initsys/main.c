@@ -9,6 +9,23 @@ extern int __libc_spawn(const char *name, char *const argv[], char *const envp[]
 
 #define RC_CONF_PATH "/etc/rc.conf"
 
+static void run_service(const char *name) {
+    char *const svc_argv[] = { (char *)name, 0 };
+    int rc = __libc_spawn(name, svc_argv, environ);
+    if (rc < 0) {
+        printf("[hello_initsys] service '%s' failed to start\n", name);
+        return;
+    }
+    int status;
+    pid_t child = waitpid(rc, &status, 0);
+    if (child < 0) {
+        printf("[hello_initsys] service '%s' (tid=%d) wait failed\n", name, rc);
+        return;
+    }
+    printf("[hello_initsys] service '%s' (tid=%d) exited status=%d\n",
+           name, rc, WEXITSTATUS(status));
+}
+
 int main(int argc, char **argv) {
     printf("[hello_initsys] init starting\n");
 
@@ -19,10 +36,12 @@ int main(int argc, char **argv) {
 
     static char rc_shell[64] = "sh";
     int rc_respawn = 1;
+    int rc_mount_services = 1;
 
     static cfg_opt_t rc_opts[] = {
         CFG_STR("shell", "sh", CFGF_NONE),
         CFG_BOOL("respawn", cfg_true, CFGF_NONE),
+        CFG_BOOL("mount_services", cfg_true, CFGF_NONE),
         CFG_END()
     };
     cfg_t *cfg = cfg_init(rc_opts, CFGF_NONE);
@@ -35,12 +54,20 @@ int main(int argc, char **argv) {
                 rc_shell[sizeof(rc_shell) - 1] = '\0';
             }
             rc_respawn = (cfg_getbool(cfg, "respawn") == cfg_true);
-            printf("[hello_initsys] loaded " RC_CONF_PATH ": shell='%s' respawn=%d\n",
-                   rc_shell, rc_respawn);
+            rc_mount_services = (cfg_getbool(cfg, "mount_services") == cfg_true);
+            printf("[hello_initsys] loaded " RC_CONF_PATH ": shell='%s' respawn=%d mount_services=%d\n",
+                   rc_shell, rc_respawn, rc_mount_services);
         } else {
-            printf("[hello_initsys] no usable " RC_CONF_PATH ", using defaults: shell='%s' respawn=%d\n",
-                   rc_shell, rc_respawn);
+            printf("[hello_initsys] no usable " RC_CONF_PATH ", using defaults: shell='%s' respawn=%d mount_services=%d\n",
+                   rc_shell, rc_respawn, rc_mount_services);
         }
+    }
+
+    if (rc_mount_services) {
+        run_service("mount_devfs");
+        run_service("mount_procfs");
+        run_service("mount_sysfs");
+        run_service("mount_tmpfs");
     }
 
     char *default_argv[] = { rc_shell, 0 };

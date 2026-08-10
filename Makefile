@@ -166,6 +166,38 @@ $(APPS_BUILD_DIR)/consoletest/consoletest: $(APPS_BUILD_DIR)/consoletest/console
 	$(LD) $(APP_LDFLAGS) -T apps/link/consoletest.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/consoletest/consoletest.c.o
 
+$(APPS_BUILD_DIR)/vfs_mount/mount_devfs.c.o: apps/vfs_mount/mount_devfs.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/vfs_mount/mount_devfs: $(APPS_BUILD_DIR)/vfs_mount/mount_devfs.c.o apps/link/mount_devfs.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/mount_devfs.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/vfs_mount/mount_devfs.c.o
+
+$(APPS_BUILD_DIR)/vfs_mount/mount_procfs.c.o: apps/vfs_mount/mount_procfs.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/vfs_mount/mount_procfs: $(APPS_BUILD_DIR)/vfs_mount/mount_procfs.c.o apps/link/mount_procfs.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/mount_procfs.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/vfs_mount/mount_procfs.c.o
+
+$(APPS_BUILD_DIR)/vfs_mount/mount_sysfs.c.o: apps/vfs_mount/mount_sysfs.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/vfs_mount/mount_sysfs: $(APPS_BUILD_DIR)/vfs_mount/mount_sysfs.c.o apps/link/mount_sysfs.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/mount_sysfs.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/vfs_mount/mount_sysfs.c.o
+
+$(APPS_BUILD_DIR)/vfs_mount/mount_tmpfs.c.o: apps/vfs_mount/mount_tmpfs.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/vfs_mount/mount_tmpfs: $(APPS_BUILD_DIR)/vfs_mount/mount_tmpfs.c.o apps/link/mount_tmpfs.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/mount_tmpfs.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/vfs_mount/mount_tmpfs.c.o
+
 MLIBC_DIR := apps/mlibc
 MLIBC_BUILD_DIR := $(BUILD_DIR)/mlibc
 MLIBC_SYSROOT := $(abspath $(BUILD_DIR)/mlibc-sysroot)
@@ -364,6 +396,10 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/am/am \
                          $(APPS_BUILD_DIR)/top/top \
                          $(APPS_BUILD_DIR)/readlinetest/readlinetest \
+                         $(APPS_BUILD_DIR)/vfs_mount/mount_devfs \
+                         $(APPS_BUILD_DIR)/vfs_mount/mount_procfs \
+                         $(APPS_BUILD_DIR)/vfs_mount/mount_sysfs \
+                         $(APPS_BUILD_DIR)/vfs_mount/mount_tmpfs \
                          $(APPS_BUILD_DIR)/hello_initsys/hello_initsys \
                          $(APPS_BUILD_DIR)/minibox/minibox \
                          $(APPS_BUILD_DIR)/sh/sh \
@@ -386,6 +422,10 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/sbin/reboot
 	cp $(APPS_BUILD_DIR)/powertools/halt $(ROOTFS_STAGE)/sbin/halt
 	cp $(APPS_BUILD_DIR)/powertools/shutdown $(ROOTFS_STAGE)/sbin/shutdown
+	cp $(APPS_BUILD_DIR)/vfs_mount/mount_devfs $(ROOTFS_STAGE)/sbin/mount_devfs
+	cp $(APPS_BUILD_DIR)/vfs_mount/mount_procfs $(ROOTFS_STAGE)/sbin/mount_procfs
+	cp $(APPS_BUILD_DIR)/vfs_mount/mount_sysfs $(ROOTFS_STAGE)/sbin/mount_sysfs
+	cp $(APPS_BUILD_DIR)/vfs_mount/mount_tmpfs $(ROOTFS_STAGE)/sbin/mount_tmpfs
 	cp $(APPS_BUILD_DIR)/am/am $(ROOTFS_STAGE)/bin/am
 	cp $(APPS_BUILD_DIR)/top/top $(ROOTFS_STAGE)/bin/top
 	cp $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(ROOTFS_STAGE)/usr/sbin/hello_initsys
