@@ -33,7 +33,6 @@ int main(int argc, char **argv) {
     setenv("HOME", "/var/root", 1);
     setenv("USER", "root", 1);
     setenv("LOGNAME", "root", 1);
-    setenv("SHELL", "/bin/sh", 1);
 
     static char rc_shell[64] = "sh";
     int rc_respawn = 1;

@@ -67,6 +67,10 @@ int main(void) {
         printf("[tty_service] no tty interface available, running without a tty\n");
     }
 
+    char shell_path[80];
+    snprintf(shell_path, sizeof(shell_path), "/bin/%s", rc_shell);
+    setenv("SHELL", shell_path, 1);
+
     char *const argv[] = { rc_shell, NULL };
     execve(rc_shell, argv, environ);
     printf("[tty_service] failed to exec '%s'\n", rc_shell);
