@@ -13,7 +13,7 @@
 ![Clang](https://img.shields.io/badge/LLVM-clang-262D3A?logo=llvm)
 ![Build](https://img.shields.io/badge/Build-Makefile-427819)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Status](https://img.shields.io/badge/Status-pre--alpha-orange)
+![Status](https://img.shields.io/badge/Status-alpha-orange)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/bayar17/robu_microkernel/ci.yml)
 
 </div>
