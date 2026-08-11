@@ -151,7 +151,7 @@ $(APPS_BUILD_DIR)/powertools/shutdown: $(APPS_BUILD_DIR)/powertools/shutdown.c.o
 	$(LD) $(APP_LDFLAGS) -T apps/link/shutdown.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/powertools/shutdown.c.o
 
-$(APPS_BUILD_DIR)/sigtest/sigtest.c.o: apps/sigtest/sigtest.c
+$(APPS_BUILD_DIR)/sigtest/sigtest.c.o: tests/sigtest/sigtest.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -159,7 +159,7 @@ $(APPS_BUILD_DIR)/sigtest/sigtest: $(APPS_BUILD_DIR)/sigtest/sigtest.c.o apps/li
 	$(LD) $(APP_LDFLAGS) -T apps/link/sigtest.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/sigtest/sigtest.c.o
 
-$(APPS_BUILD_DIR)/consoletest/consoletest.c.o: apps/consoletest/consoletest.c
+$(APPS_BUILD_DIR)/consoletest/consoletest.c.o: tests/consoletest/consoletest.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -292,7 +292,7 @@ $(APPS_BUILD_DIR)/sh/sh: $(APPS_BUILD_DIR)/sh/minibox-shell.c.o apps/link/sh.ld
 
 sh: $(APPS_BUILD_DIR)/sh/sh
 
-$(APPS_BUILD_DIR)/mlibc-hello/hello.c.o: apps/mlibc-hello/hello.c mlibc
+$(APPS_BUILD_DIR)/mlibc-hello/hello.c.o: tests/mlibc-hello/hello.c mlibc
 	@mkdir -p $(@D)
 	$(CC) $(MLIBC_APP_CFLAGS) -c $< -o $@
 
@@ -377,7 +377,7 @@ _bash-build: $(BASH_DIR)/config.h
 $(BASH_DIR)/bash:
 	$(MAKE) bash-build
 
-$(APPS_BUILD_DIR)/readlinetest/readlinetest.c.o: apps/readlinetest/readlinetest.c mlibc
+$(APPS_BUILD_DIR)/readlinetest/readlinetest.c.o: tests/readlinetest/readlinetest.c mlibc
 	@mkdir -p $(@D)
 	@[ -L $(READLINE_DIR)/readline ] || ln -s . $(READLINE_DIR)/readline
 	$(CC) $(MLIBC_APP_CFLAGS) -I$(READLINE_DIR) -c $< -o $@
