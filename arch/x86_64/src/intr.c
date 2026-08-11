@@ -1,6 +1,7 @@
 #include "robu/types.h"
 #include "robu/arch.h"
 #include "portio.h"
+#include "uacpi_glue.h"
 
 struct idt_entry {
     uint16_t off_lo;
@@ -49,6 +50,55 @@ static void pic_init(void) {
     outb(PIC2_DATA, 0xFF);
 }
 
+#define MAX_DYNAMIC_IRQ 16
+static arch_irq_handler_t irq_handlers[MAX_DYNAMIC_IRQ];
+static void *irq_ctxs[MAX_DYNAMIC_IRQ];
+
+int arch_irq_register(uint32_t irq, arch_irq_handler_t handler, void *ctx) {
+    if (irq >= MAX_DYNAMIC_IRQ) {
+        return -1;
+    }
+    irq_handlers[irq] = handler;
+    irq_ctxs[irq] = ctx;
+    uint16_t port = irq < 8 ? PIC1_DATA : PIC2_DATA;
+    uint8_t bit = irq < 8 ? (uint8_t)irq : (uint8_t)(irq - 8);
+    uint8_t mask = inb(port);
+    outb(port, mask & (uint8_t)~(1u << bit));
+    if (irq >= 8) {
+        uint8_t cascade_mask = inb(PIC1_DATA);
+        outb(PIC1_DATA, cascade_mask & (uint8_t)~(1u << 2));
+    }
+    return 0;
+}
+
+void arch_irq_unregister(uint32_t irq) {
+    if (irq >= MAX_DYNAMIC_IRQ) {
+        return;
+    }
+    irq_handlers[irq] = 0;
+    irq_ctxs[irq] = 0;
+    uint16_t port = irq < 8 ? PIC1_DATA : PIC2_DATA;
+    uint8_t bit = irq < 8 ? (uint8_t)irq : (uint8_t)(irq - 8);
+    uint8_t mask = inb(port);
+    outb(port, mask | (uint8_t)(1u << bit));
+}
+
+int arch_irq_dispatch(uint32_t vector) {
+    if (vector < 32 || vector >= 48) {
+        return 0;
+    }
+    uint32_t irq = vector - 32;
+    if (irq >= MAX_DYNAMIC_IRQ || !irq_handlers[irq]) {
+        return 0;
+    }
+    irq_handlers[irq](irq_ctxs[irq]);
+    outb(PIC1_CMD, 0x20);
+    if (irq >= 8) {
+        outb(PIC2_CMD, 0x20);
+    }
+    return 1;
+}
+
 static struct idt_ptr shared_idt_ptr;
 
 void arch_intr_init(void) {
@@ -77,6 +127,7 @@ void arch_test_exit(int code) {
 }
 
 void arch_reboot(void) {
+    uacpi_glue_reboot();
     uint8_t good = 0x02;
     while (good & 0x02) good = inb(0x64);
     outb(0x64, 0xFE);
@@ -94,7 +145,7 @@ void arch_halt(void) {
 }
 
 void arch_shutdown(void) {
-    outb(0xF4, 0x00);
+    uacpi_glue_shutdown();
     for (;;) {
         asm volatile("cli; hlt");
     }

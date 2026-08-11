@@ -10,6 +10,7 @@
 #include "robu/cmdline.h"
 #include "robu/untyped.h"
 #include "robu/dma.h"
+#include "robu/kheap.h"
 #include "robu/virtio_blk.h"
 #include "lapic.h"
 #include "smp.h"
@@ -19,6 +20,7 @@
 
 #define UNTYPED_REGION_SIZE (128u * 1024)
 #define DMA_REGION_SIZE (256u * 1024)
+#define ACPI_HEAP_REGION_SIZE (2u * 1024 * 1024)
 
 int quiet_mode;
 
@@ -115,20 +117,23 @@ void kmain(void) {
     if (cmdline_get("force_fatal")) {
         effective_len = 0;
     }
-    if (effective_len < UNTYPED_REGION_SIZE + DMA_REGION_SIZE) {
-        kprintf("[boot] FATAL: not enough identity-mapped RAM for the untyped+DMA regions "
+    if (effective_len < UNTYPED_REGION_SIZE + DMA_REGION_SIZE + ACPI_HEAP_REGION_SIZE) {
+        kprintf("[boot] FATAL: not enough identity-mapped RAM for the untyped+DMA+ACPI heap regions "
                 "(have %lu bytes, need %lu)\n",
-                effective_len, (uint64_t)(UNTYPED_REGION_SIZE + DMA_REGION_SIZE));
+                effective_len, (uint64_t)(UNTYPED_REGION_SIZE + DMA_REGION_SIZE + ACPI_HEAP_REGION_SIZE));
         for (;;) { asm volatile("cli; hlt"); }
     }
-    uint64_t pmm_len = effective_len - UNTYPED_REGION_SIZE - DMA_REGION_SIZE;
+    uint64_t pmm_len = effective_len - UNTYPED_REGION_SIZE - DMA_REGION_SIZE - ACPI_HEAP_REGION_SIZE;
     paddr_t dma_region_base = mem_base + pmm_len;
     paddr_t untyped_base = dma_region_base + DMA_REGION_SIZE;
+    paddr_t acpi_heap_base = untyped_base + UNTYPED_REGION_SIZE;
     pmm_init(mem_base, pmm_len, mod_base, mod_len);
     dma_region_init(dma_region_base, DMA_REGION_SIZE);
     untyped_init(untyped_base, UNTYPED_REGION_SIZE);
+    kheap_init(acpi_heap_base, ACPI_HEAP_REGION_SIZE);
     kprintf("[boot] dma region: %lu bytes at 0x%lx\n", (uint64_t)DMA_REGION_SIZE, dma_region_base);
     kprintf("[boot] untyped region: %lu bytes at 0x%lx\n", (uint64_t)UNTYPED_REGION_SIZE, untyped_base);
+    kprintf("[boot] acpi heap region: %lu bytes at 0x%lx\n", (uint64_t)ACPI_HEAP_REGION_SIZE, acpi_heap_base);
     kprintf("[boot] frames: total=%lu free=%lu\n",
             pmm_stats.total_frames, pmm_stats.free_frames);
 

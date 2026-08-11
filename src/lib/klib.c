@@ -41,3 +41,12 @@ int strncmp(const char *a, const char *b, size_t n) {
     }
     return 0;
 }
+int memcmp(const void *a, const void *b, size_t n) {
+    const unsigned char *pa = a, *pb = b;
+    while (n--) {
+        if (*pa != *pb) return (int)*pa - (int)*pb;
+        pa++;
+        pb++;
+    }
+    return 0;
+}

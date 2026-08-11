@@ -87,6 +87,10 @@ void trap_dispatch(arch_uctx_t *frame) {
         arch_enter_thread_raw(&current_thread->uctx);
     }
     sched_lock_acquire();
+    if (arch_irq_dispatch((uint32_t)frame->vector)) {
+        sched_resume();
+        return;
+    }
     switch (frame->vector) {
     case TRAP_VEC_TIMER:
         lapic_eoi();

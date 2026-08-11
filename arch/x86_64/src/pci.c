@@ -32,6 +32,12 @@ void pci_cfg_write16(pci_addr_t addr, uint8_t offset, uint16_t value) {
     uint32_t mask = 0xFFFFu << shift;
     pci_cfg_write32(addr, offset, (old & ~mask) | ((uint32_t)value << shift));
 }
+void pci_cfg_write8(pci_addr_t addr, uint8_t offset, uint8_t value) {
+    uint32_t old = pci_cfg_read32(addr, offset);
+    uint32_t shift = (offset & 3) * 8;
+    uint32_t mask = 0xFFu << shift;
+    pci_cfg_write32(addr, offset, (old & ~mask) | ((uint32_t)value << shift));
+}
 
 static int walk_devices(int (*cb)(pci_addr_t addr, uint16_t vendor, uint16_t device, void *ctx),
                          void *ctx) {

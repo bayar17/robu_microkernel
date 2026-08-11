@@ -66,6 +66,15 @@ struct mb2_tag_mmap {
     struct mb2_mmap_entry entries[1];
 };
 
+struct mb2_tag_rsdp {
+    uint32_t type;
+    uint32_t size;
+    uint8_t rsdp_data[1];
+};
+
+#define MB2_TAG_RSDP_OLD 14
+#define MB2_TAG_RSDP_NEW 15
+
 #define HVM_MEMMAP_TYPE_RAM 1
 extern uint64_t pvh_start_info_ptr;
 extern uint64_t multiboot2_info_ptr;
@@ -140,6 +149,29 @@ int arch_boot_module(paddr_t *out_base, uint64_t *out_len) {
     *out_base = (paddr_t)mods[0].paddr;
     *out_len = mods[0].size;
     return 0;
+}
+
+int arch_boot_rsdp(paddr_t *out_rsdp) {
+    if (multiboot2_info_ptr) {
+        uint32_t total_size = *(uint32_t *)multiboot2_info_ptr;
+        uint8_t *ptr = (uint8_t *)(multiboot2_info_ptr + 8);
+        while (ptr < (uint8_t *)multiboot2_info_ptr + total_size) {
+            struct mb2_tag *tag = (struct mb2_tag *)ptr;
+            if (tag->type == 0) break;
+            if (tag->type == MB2_TAG_RSDP_OLD || tag->type == MB2_TAG_RSDP_NEW) {
+                struct mb2_tag_rsdp *rsdp = (struct mb2_tag_rsdp *)tag;
+                *out_rsdp = (paddr_t)(uint64_t)&rsdp->rsdp_data[0];
+                return 0;
+            }
+            ptr += (tag->size + 7) & ~7;
+        }
+    }
+    const struct hvm_start_info *info = pvh_info();
+    if (info && info->rsdp_paddr) {
+        *out_rsdp = (paddr_t)info->rsdp_paddr;
+        return 0;
+    }
+    return -1;
 }
 
 void arch_detect_memory(paddr_t *out_base, uint64_t *out_len) {

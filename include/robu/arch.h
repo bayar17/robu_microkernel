@@ -9,6 +9,10 @@ void arch_timer_kick_cpu(uint32_t cpu_id);
 void arch_panic_freeze_other_cores(void);
 void arch_tlb_shootdown(paddr_t aspace, vaddr_t va);
 void arch_tlb_shootdown_handle_local(void);
+typedef void (*arch_irq_handler_t)(void *ctx);
+int arch_irq_register(uint32_t irq, arch_irq_handler_t handler, void *ctx);
+void arch_irq_unregister(uint32_t irq);
+int arch_irq_dispatch(uint32_t vector);
 void arch_reboot(void) __attribute__((noreturn));
 void arch_halt(void) __attribute__((noreturn));
 void arch_shutdown(void) __attribute__((noreturn));
@@ -39,4 +43,6 @@ void *memcpy(void *dest, const void *src, size_t n);
 void *memmove(void *dest, const void *src, size_t n);
 size_t strlen(const char *s);
 int strncmp(const char *a, const char *b, size_t n);
+int memcmp(const void *a, const void *b, size_t n);
+int arch_boot_rsdp(paddr_t *out_rsdp);
 #endif

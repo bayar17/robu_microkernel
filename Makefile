@@ -21,7 +21,7 @@ else
   $(error Unknown BUILD_SYS '$(BUILD_SYS)' -- expected 'clang' or 'gcc')
 endif
 
-CFLAGS := -ffreestanding -O2 -g -Wall -Wextra -Iinclude -I$(ARCH_DIR)/include
+CFLAGS := -ffreestanding -O2 -g -Wall -Wextra -Iinclude -I$(ARCH_DIR)/include -Iapps/uACPI/include -DUACPI_OVERRIDE_TYPES
 CFLAGS += -fno-pic -fno-pie -fno-stack-protector
 CFLAGS += -fno-omit-frame-pointer
 CFLAGS += -DROBU_TRACE=$(TRACE)
@@ -40,7 +40,8 @@ CFLAGS += -I$(GEN_DIR)
 
 RING3_SRC_DIRS := $(SRC_DIR)/servers/%.c $(SRC_DIR)/powertools/%.c
 C_SRCS := $(filter-out $(RING3_SRC_DIRS),$(wildcard $(SRC_DIR)/*/*.c)) \
-          $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/src/*.c)
+          $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/src/*.c) \
+          $(wildcard apps/uACPI/source/*.c)
 ASM_SRCS := $(wildcard $(ARCH_DIR)/src/*.S)
 
 OBJS := $(C_SRCS:%.c=$(BUILD_DIR)/%.c.o) $(ASM_SRCS:%.S=$(BUILD_DIR)/%.S.o)
