@@ -26,8 +26,7 @@ A microkernel written from scratch in C and assembly, built on one premise: **th
 
 **Prior Art.** The mechanisms below — synchronous register IPC, timeslice donation, lazy scheduling with direct switch, user-space paging — come from the [L4 lineage](https://en.wikipedia.org/wiki/L4_microkernel_family), beginning with Liedtke's work in the early 1990s.
 
-> **Pre-alpha.** Robu does not boot yet and has no stable API. Nothing here is usable for anything but reading and contributing. Interfaces described below will change.
-
+> **Alpha.** Robu can boot now and stable services, but can have many undiscovered bugs, if you find one, open a issue.
 ---
 #### Project Description 🖥️
 
