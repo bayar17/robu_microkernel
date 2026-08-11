@@ -336,13 +336,10 @@ void arch_console_init(void) {
 }
 
 void arch_console_putc(char c) {
-    /* Suprime a inundação do log serial quando um app TUI está ativo */
-    if (!console_raw_mode) {
-        if (c == '\n') {
-            serial_putc('\r');
-        }
-        serial_putc(c);
+    if (c == '\n') {
+        serial_putc('\r');
     }
+    serial_putc(c);
     vga_putc(c);
 }
 
