@@ -331,6 +331,14 @@ $(READLINE_BUILD_DIR)/%.c.o: $(READLINE_DIR)/%.c mlibc
 $(READLINE_BUILD_DIR)/libreadline.a: $(READLINE_OBJS)
 	$(AR) rcs $@ $(READLINE_OBJS)
 
+READLINE_PREFIX := $(abspath $(BUILD_DIR)/readline-prefix)
+
+$(READLINE_PREFIX)/lib/libreadline.a: $(READLINE_BUILD_DIR)/libreadline.a
+	@mkdir -p $(READLINE_PREFIX)/lib $(READLINE_PREFIX)/include
+	@ln -sf $(abspath $(READLINE_BUILD_DIR)/libreadline.a) $(READLINE_PREFIX)/lib/libreadline.a
+	@ln -sf $(abspath $(READLINE_BUILD_DIR)/libreadline.a) $(READLINE_PREFIX)/lib/libhistory.a
+	@[ -L $(READLINE_PREFIX)/include/readline ] || ln -sf $(abspath $(READLINE_DIR)) $(READLINE_PREFIX)/include/readline
+
 readline:
 	./scripts/identify-os.sh _readline
 
@@ -339,7 +347,7 @@ _readline: $(READLINE_BUILD_DIR)/libreadline.a
 BASH_DIR := apps/bash
 BASH_BUILD_DIR := $(APPS_BUILD_DIR)/bash
 
-$(BASH_DIR)/config.h: $(BASH_DIR)/robu.cache mlibc readline
+$(BASH_DIR)/config.h: $(BASH_DIR)/robu.cache mlibc readline $(READLINE_PREFIX)/lib/libreadline.a
 	cd $(BASH_DIR) && CC="clang --target=x86_64-linux-gnu" \
 	    CC_FOR_BUILD=clang \
 	    CFLAGS="-ffreestanding -fPIC -fno-stack-protector -mno-red-zone -D_GNU_SOURCE -nostdinc -isystem $$(clang --print-resource-dir)/include -isystem $(MLIBC_SYSROOT)/usr/include" \
@@ -347,6 +355,7 @@ $(BASH_DIR)/config.h: $(BASH_DIR)/robu.cache mlibc readline
 	    ./configure --host=x86_64-linux-gnu --build=x86_64-pc-linux-gnu \
 	        --cache-file=$(abspath $(BASH_DIR)/robu.cache) \
 	        --without-bash-malloc --enable-readline --enable-job-control \
+	        --with-installed-readline=$(READLINE_PREFIX) \
 	        --disable-nls --disable-rpath --without-libiconv-prefix --without-libintl-prefix
 
 bash-configure:
@@ -360,7 +369,13 @@ bash-build:
 _bash-build: $(BASH_DIR)/config.h
 	touch $(BASH_DIR)/configure.ac $(BASH_DIR)/aclocal.m4 $(BASH_DIR)/config.h.in
 	touch $(BASH_DIR)/configure
+	touch $(BASH_DIR)/config.status $(BASH_DIR)/Makefile
+	./scripts/bash-patch-makefile.sh $(BASH_DIR)/Makefile $(abspath apps/link/bash.ld) \
+	    $(MLIBC_CRT_OBJS) $(MLIBC_SYSROOT)/usr/lib/libc.a $(MLIBC_SYSROOT)/usr/lib/libm.a
 	$(MAKE) -C $(BASH_DIR)
+
+$(BASH_DIR)/bash:
+	$(MAKE) bash-build
 
 $(APPS_BUILD_DIR)/readlinetest/readlinetest.c.o: apps/readlinetest/readlinetest.c mlibc
 	@mkdir -p $(@D)
@@ -414,6 +429,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/minibox/minibox \
                          $(APPS_BUILD_DIR)/sh/sh \
                          $(APPS_BUILD_DIR)/stub/stub \
+                         $(BASH_DIR)/bash \
                          apps/hello_initsys/rc.conf etc/passwd
 	rm -rf $(ROOTFS_STAGE)
 	mkdir -p $(ROOTFS_STAGE) $(ROOTFS_STAGE)/bin $(ROOTFS_STAGE)/sbin \
@@ -443,6 +459,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	cp etc/passwd $(ROOTFS_STAGE)/etc/passwd
 	cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/bin/minibox
 	cp $(APPS_BUILD_DIR)/sh/sh $(ROOTFS_STAGE)/bin/sh
+	cp $(BASH_DIR)/bash $(ROOTFS_STAGE)/bin/bash
 	cp $(APPS_BUILD_DIR)/stub/stub $(ROOTFS_STAGE)/bin/file
 	cp $(APPS_BUILD_DIR)/stub/stub $(ROOTFS_STAGE)/bin/find
 	cp $(APPS_BUILD_DIR)/stub/stub $(ROOTFS_STAGE)/bin/mv

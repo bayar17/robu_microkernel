@@ -27,6 +27,7 @@ static void run_service(const char *name) {
 }
 
 int main(int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     printf("[hello_initsys] init starting\n");
 
     setenv("HOME", "/var/root", 1);

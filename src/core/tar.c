@@ -47,30 +47,58 @@ static const char *hdr_basename(const char *hdr_name, size_t field_len) {
     }
     return base;
 }
+static const char *query_basename(const char *name) {
+    const char *base = name;
+    for (const char *p = name; *p; p++) {
+        if (*p == '/' && p[1] != '\0') {
+            base = p + 1;
+        }
+    }
+    return base;
+}
 int tar_find(const void *archive, uint64_t archive_len, const char *name,
              const uint8_t **out_data, uint64_t *out_size) {
     const uint8_t *base = (const uint8_t *)archive;
-    uint64_t off = 0;
-    size_t name_len = strlen(name);
-    while (off + USTAR_BLOCK <= archive_len) {
-        const uint8_t *block = base + off;
-        if (is_all_zero(block)) {
-            break;
+    char query_buf[100];
+    const char *query = query_basename(name);
+    for (int hop = 0; hop < 8; hop++) {
+        size_t name_len = strlen(query);
+        uint64_t off = 0;
+        int found_symlink = 0;
+        while (off + USTAR_BLOCK <= archive_len) {
+            const uint8_t *block = base + off;
+            if (is_all_zero(block)) {
+                break;
+            }
+            const ustar_header_t *hdr = (const ustar_header_t *)block;
+            if (strncmp(hdr->magic, "ustar", 5) != 0) {
+                break;
+            }
+            uint64_t size = parse_octal(hdr->size, sizeof(hdr->size));
+            off += USTAR_BLOCK;
+            if (strncmp(hdr_basename(hdr->name, sizeof(hdr->name)), query, name_len + 1) == 0) {
+                if (hdr->typeflag == '0' || hdr->typeflag == '\0') {
+                    *out_data = base + off;
+                    *out_size = size;
+                    return 0;
+                }
+                if (hdr->typeflag == '2') {
+                    size_t i = 0;
+                    for (; i < sizeof(hdr->linkname) && hdr->linkname[i]; i++) {
+                        query_buf[i] = hdr->linkname[i];
+                    }
+                    query_buf[i] = '\0';
+                    query = query_basename(query_buf);
+                    found_symlink = 1;
+                    break;
+                }
+            }
+            uint64_t data_blocks = (size + USTAR_BLOCK - 1) / USTAR_BLOCK;
+            off += data_blocks * USTAR_BLOCK;
         }
-        const ustar_header_t *hdr = (const ustar_header_t *)block;
-        if (strncmp(hdr->magic, "ustar", 5) != 0) {
-            break;
+        if (!found_symlink) {
+            return -1;
         }
-        uint64_t size = parse_octal(hdr->size, sizeof(hdr->size));
-        off += USTAR_BLOCK;
-        int is_regular = (hdr->typeflag == '0' || hdr->typeflag == '\0');
-        if (is_regular && strncmp(hdr_basename(hdr->name, sizeof(hdr->name)), name, name_len + 1) == 0) {
-            *out_data = base + off;
-            *out_size = size;
-            return 0;
-        }
-        uint64_t data_blocks = (size + USTAR_BLOCK - 1) / USTAR_BLOCK;
-        off += data_blocks * USTAR_BLOCK;
     }
     return -1;
 }
