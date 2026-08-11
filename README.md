@@ -26,7 +26,7 @@ A microkernel written from scratch in C and assembly, built on one premise: **th
 
 **Prior Art.** The mechanisms below — synchronous register IPC, timeslice donation, lazy scheduling with direct switch, user-space paging — come from the [L4 lineage](https://en.wikipedia.org/wiki/L4_microkernel_family), beginning with Liedtke's work in the early 1990s.
 
-> **Pre-alpha.** Robu does not boot yet and has no stable API. Nothing here is usable for anything but reading and contributing. Interfaces described below will change.
+> **Alpha.** Robu can boot now and stable services, but can have many undiscovered bugs, if you find one, open a issue.
 
 ---
 #### Project Description 🖥️
@@ -48,12 +48,14 @@ A microkernel written from scratch in C and assembly, built on one premise: **th
 ## Design Criteria
 
 ### What a microkernel is 🧠
+---
 
 A microkernel keeps only what cannot live anywhere else in the privileged part of the system: threads, address spaces, and message passing. Drivers, filesystems, network stacks, and pagers all run as ordinary user-space processes.
 
 The payoff is isolation. A driver that faults takes down a restartable process instead of the machine. Components hold only the privileges they need, so a compromise stays contained. Subsystems can be replaced, upgraded, or restarted without recompiling — or rebooting — the kernel. That combination is why microkernels dominate in embedded and safety-critical work.
 
 ### What it costs — and what Robu does about it 📉
+---
 
 The standard objection is real: pushing services into user space converts function calls into IPC, and naive IPC is expensive. Every cost has a specific location, though, and each one is where Robu spends its design budget.
 
@@ -66,6 +68,87 @@ The standard objection is real: pushing services into user space converts functi
 **Memory management policy.** Robu's kernel implements the mapping mechanism and nothing more. Page faults are delegated to a user-space pager, which decides what to do about them. Policy — paging strategy, allocation, sharing — lives outside the kernel, where it can be replaced per-workload.
 
 **Interrupt handling.** In-kernel handlers do the minimum: acknowledge, and turn the event into a message for the user-space driver. Device logic never runs in privileged mode.
+
+### Clone and build
+---
+## Clone and Build
+
+Robu Microkernel uses several external projects, including [mlibc](https://github.com/managarm/mlibc), [minibox](https://github.com/Qwer-TeX/minibox), [libconfuse](https://github.com/libconfuse/libconfuse), [Bash](https://savannah.gnu.org/projects/bash/), and [Readline](https://savannah.gnu.org/projects/readline/).
+
+Clone the repository together with its submodules:
+
+```sh
+git clone --recursive https://github.com/bayar17/robu_microkernel.git
+cd robu_microkernel
+```
+
+### Build Everything
+
+The default target builds the Robu kernel and the userspace components required to assemble the root filesystem:
+
+```sh
+make
+```
+
+### Build Components Separately
+
+Individual components can also be built separately. This can be useful when debugging a failed build or rebuilding a specific userspace component.
+
+Build **mlibc**:
+
+```sh
+make mlibc
+```
+
+Build **minibox**, which provides the POSIX-style userspace utility set:
+
+```sh
+make minibox
+```
+
+Build **minibox's shell**:
+
+```sh
+make sh
+```
+
+Build **Readline**:
+
+```sh
+make readline
+```
+
+Configure and build **Bash**:
+
+```sh
+make bash-configure
+make bash-build
+```
+
+If a component fails to build, rebuilding it separately can make it easier to identify and diagnose the problem.
+
+### Build a Bootable ISO
+
+Once the kernel and root filesystem have been built, create a bootable ISO with:
+
+```sh
+make iso
+```
+
+The resulting image is:
+
+```text
+build/robu_kernel.iso
+```
+
+### Run in QEMU
+
+To build the ISO and boot Robu directly in QEMU:
+
+```sh
+make run
+```
+
 
 ### API surface
 
