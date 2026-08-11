@@ -44,11 +44,27 @@ static const char scancode_ascii_shift[128] = {
 };
 
 static int shift_pressed = 0;
+static int ctrl_pressed = 0;
+static int alt_pressed = 0;
 static int extended_pending = 0;
-static int console_raw_mode = 0;
 static char pending_bytes[4];
 static int pending_len = 0;
 static int pending_pos = 0;
+
+#define VT_COUNT 6
+#define CONSOLE_LINE_MAX 128
+#define CONSOLE_RING_SIZE 256
+
+typedef struct {
+    int raw_mode;
+    char ring[CONSOLE_RING_SIZE];
+    uint32_t ring_head, ring_tail;
+    char line_buf[CONSOLE_LINE_MAX];
+    int line_len;
+} vt_state_t;
+
+static vt_state_t vts[VT_COUNT];
+static int active_vt = 0;
 
 #define VGA_COLS 80
 #define VGA_ROWS 25
@@ -268,6 +284,18 @@ static int extended_key_to_ansi(uint8_t scancode) {
     }
 }
 
+void arch_console_switch_vt(int vt) {
+    if (vt < 0 || vt >= VT_COUNT || vt == active_vt) {
+        return;
+    }
+    active_vt = vt;
+    vga_clear();
+}
+
+int arch_console_get_active_vt(void) {
+    return active_vt;
+}
+
 static int ps2_getc(void) {
     if (pending_pos < pending_len) {
         return (int)(uint8_t)pending_bytes[pending_pos++];
@@ -292,6 +320,30 @@ static int ps2_getc(void) {
         shift_pressed = 0;
         return -1;
     }
+    if (scancode == 0x1D) {
+        extended_pending = 0;
+        ctrl_pressed = 1;
+        return -1;
+    }
+    if (scancode == 0x9D) {
+        extended_pending = 0;
+        ctrl_pressed = 0;
+        return -1;
+    }
+    if (scancode == 0x38) {
+        extended_pending = 0;
+        alt_pressed = 1;
+        return -1;
+    }
+    if (scancode == 0xB8) {
+        extended_pending = 0;
+        alt_pressed = 0;
+        return -1;
+    }
+    if (ctrl_pressed && alt_pressed && scancode >= 0x3B && scancode <= 0x40) {
+        arch_console_switch_vt((int)(scancode - 0x3B));
+        return -1;
+    }
     if (scancode & 0x80) {
         extended_pending = 0;
         return -1;
@@ -311,7 +363,7 @@ static int ps2_getc(void) {
             return -1;
         }
 
-        if (console_raw_mode && extended_key_to_ansi(scancode)) {
+        if (vts[active_vt].raw_mode && extended_key_to_ansi(scancode)) {
             pending_pos = 1;
             return (int)(uint8_t)pending_bytes[0];
         }
@@ -350,72 +402,87 @@ int arch_console_getc(void) {
 }
 
 static spinlock_t console_ring_lock = SPINLOCK_INIT;
-#define CONSOLE_LINE_MAX 128
-#define CONSOLE_RING_SIZE 256
-static char console_ring[CONSOLE_RING_SIZE];
-static uint32_t ring_head, ring_tail;
-static char line_buf[CONSOLE_LINE_MAX];
-static int line_len;
 
-static void ring_push_locked(char c) {
-    uint32_t next = (ring_head + 1) % CONSOLE_RING_SIZE;
-    if (next == ring_tail) {
-        return;
+void arch_console_vt_putc(int vt, char c) {
+    if (c == '\n') {
+        serial_putc('\r');
     }
-    console_ring[ring_head] = c;
-    ring_head = next;
+    serial_putc(c);
+    if (vt == active_vt) {
+        vga_putc(c);
+    }
 }
 
-void arch_console_set_raw_mode(int enable) {
-    console_raw_mode = enable ? 1 : 0;
-    if (!enable) {
+static void ring_push_locked(vt_state_t *v, char c) {
+    uint32_t next = (v->ring_head + 1) % CONSOLE_RING_SIZE;
+    if (next == v->ring_tail) {
+        return;
+    }
+    v->ring[v->ring_head] = c;
+    v->ring_head = next;
+}
+
+void arch_console_set_raw_mode(int vt, int enable) {
+    if (vt < 0 || vt >= VT_COUNT) {
+        return;
+    }
+    vts[vt].raw_mode = enable ? 1 : 0;
+    if (!enable && vt == active_vt) {
         vga_attr = DEFAULT_ATTR;
     }
 }
 
-int arch_console_get_raw_mode(void) {
-    return console_raw_mode;
+int arch_console_get_raw_mode(int vt) {
+    if (vt < 0 || vt >= VT_COUNT) {
+        return 0;
+    }
+    return vts[vt].raw_mode;
 }
 
 void arch_console_line_feed(int c) {
-    if (console_raw_mode) {
+    vt_state_t *v = &vts[active_vt];
+    if (v->raw_mode) {
         spin_lock(&console_ring_lock);
-        ring_push_locked((char)c);
+        ring_push_locked(v, (char)c);
         spin_unlock(&console_ring_lock);
         return;
     }
     if (c == '\b' || c == 0x7F) {
-        if (line_len > 0) {
-            line_len--;
-            arch_console_putc('\b');
-            arch_console_putc(' ');
-            arch_console_putc('\b');
+        if (v->line_len > 0) {
+            v->line_len--;
+            arch_console_vt_putc(active_vt, '\b');
+            arch_console_vt_putc(active_vt, ' ');
+            arch_console_vt_putc(active_vt, '\b');
         }
         return;
     }
     if (c == '\r' || c == '\n') {
-        arch_console_putc('\n');
+        arch_console_vt_putc(active_vt, '\n');
         spin_lock(&console_ring_lock);
-        for (int i = 0; i < line_len; i++) {
-            ring_push_locked(line_buf[i]);
+        for (int i = 0; i < v->line_len; i++) {
+            ring_push_locked(v, v->line_buf[i]);
         }
-        ring_push_locked('\n');
+        ring_push_locked(v, '\n');
         spin_unlock(&console_ring_lock);
-        line_len = 0;
+        v->line_len = 0;
         return;
     }
-    if (line_len < CONSOLE_LINE_MAX - 1) {
-        line_buf[line_len++] = (char)c;
-        arch_console_putc((char)c);
+    if (v->line_len < CONSOLE_LINE_MAX - 1) {
+        v->line_buf[v->line_len++] = (char)c;
+        arch_console_vt_putc(active_vt, (char)c);
     }
 }
 
-int arch_console_read_line_bytes(uint8_t *out, int max) {
+int arch_console_read_line_bytes(int vt, uint8_t *out, int max) {
+    if (vt < 0 || vt >= VT_COUNT) {
+        return 0;
+    }
+    vt_state_t *v = &vts[vt];
     spin_lock(&console_ring_lock);
     int n = 0;
-    while (n < max && ring_tail != ring_head) {
-        out[n++] = (uint8_t)console_ring[ring_tail];
-        ring_tail = (ring_tail + 1) % CONSOLE_RING_SIZE;
+    while (n < max && v->ring_tail != v->ring_head) {
+        out[n++] = (uint8_t)v->ring[v->ring_tail];
+        v->ring_tail = (v->ring_tail + 1) % CONSOLE_RING_SIZE;
     }
     spin_unlock(&console_ring_lock);
     return n;

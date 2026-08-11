@@ -43,6 +43,7 @@ int main(int argc, char **argv) {
         CFG_STR("shell", "sh", CFGF_NONE),
         CFG_BOOL("respawn", cfg_true, CFGF_NONE),
         CFG_BOOL("mount_services", cfg_true, CFGF_NONE),
+        CFG_STR("tty", "auto", CFGF_NONE),
         CFG_END()
     };
     cfg_t *cfg = cfg_init(rc_opts, CFGF_NONE);
@@ -71,14 +72,14 @@ int main(int argc, char **argv) {
         run_service("mount_tmpfs");
     }
 
-    char *default_argv[] = { rc_shell, 0 };
+    char *default_argv[] = { (char *)"tty_service", 0 };
     const char *name;
     char **cmd_argv;
     if (argc > 1) {
         name = argv[1];
         cmd_argv = argv + 1;
     } else {
-        name = rc_shell;
+        name = "tty_service";
         cmd_argv = default_argv;
     }
 

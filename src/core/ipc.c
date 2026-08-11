@@ -137,12 +137,13 @@ void sys_ipc(void) {
                 f->rax = (uint64_t)IPC_ERR_NO_CAP;
                 return;
             }
-            uint64_t len = f->r8;
+            uint64_t len = f->r8 & 0xFF;
             if (len > 40) {
                 len = 40;
             }
+            int vt = (int)((f->r8 >> 8) & 0xFF);
             uint64_t words[5] = { f->r9, f->r10, f->r12, f->r13, f->r14 };
-            kwrite((const uint8_t *)words, len);
+            kwrite(vt, (const uint8_t *)words, len);
             f->rax = (uint64_t)IPC_ERR_NONE;
             return;
         }
@@ -151,8 +152,9 @@ void sys_ipc(void) {
                 f->rax = (uint64_t)IPC_ERR_NO_CAP;
                 return;
             }
+            int vt = (int)f->r8;
             uint64_t words[5] = {0, 0, 0, 0, 0};
-            int n = arch_console_read_line_bytes((uint8_t *)words, 40);
+            int n = arch_console_read_line_bytes(vt, (uint8_t *)words, 40);
             f->r8 = (uint64_t)n;
             f->r9 = words[0];
             f->r10 = words[1];
@@ -600,11 +602,15 @@ void sys_ipc(void) {
             } else if (category == SYS_INFO_CAT_SIGPENDING) {
                 f->r8 = cur->sig_pending;
                 f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_ACTIVE_VT) {
+                f->r8 = (uint64_t)arch_console_get_active_vt();
+                f->rax = (uint64_t)IPC_ERR_NONE;
             } else if (category == SYS_INFO_CAT_CONSOLE_MODE) {
+                int vt = (int)f->r10;
                 if (f->r9 == 2) {
-                    f->r8 = (uint64_t)arch_console_get_raw_mode();
+                    f->r8 = (uint64_t)arch_console_get_raw_mode(vt);
                 } else {
-                    arch_console_set_raw_mode((int)f->r9);
+                    arch_console_set_raw_mode(vt, (int)f->r9);
                 }
                 f->rax = (uint64_t)IPC_ERR_NONE;
             } else if (category == SYS_INFO_CAT_SETPGID) {

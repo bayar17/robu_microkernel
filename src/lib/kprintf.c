@@ -63,11 +63,11 @@ void kputs(const char *s) {
     arch_irq_restore(flags);
 }
 
-void kwrite(const uint8_t *buf, uint64_t len) {
+void kwrite(int vt, const uint8_t *buf, uint64_t len) {
     uint64_t flags = arch_irq_save();
     spin_lock(&console_lock);
     for (uint64_t i = 0; i < len; i++) {
-        arch_console_putc((char)buf[i]);
+        arch_console_vt_putc(vt, (char)buf[i]);
     }
     /* Atomic batch flush: transfers RAM framebuffer to MMIO 0xB8000 via 128-bit instructions */
     arch_console_flush();

@@ -260,6 +260,15 @@ $(APPS_BUILD_DIR)/hello_initsys/hello_initsys: $(APPS_BUILD_DIR)/hello_initsys/m
 	    $(MLIBC_CRT_OBJS) $(APPS_BUILD_DIR)/hello_initsys/main.c.o $(CONFUSE_OBJS) $(MLIBC_LIBS)
 	$(STRIP) --strip-all $@
 
+$(APPS_BUILD_DIR)/tty_service/tty_service.c.o: apps/tty_service/tty_service.c mlibc
+	@mkdir -p $(@D)
+	$(CC) $(MLIBC_APP_CFLAGS) -I$(CONFUSE_DIR) -c $< -o $@
+
+$(APPS_BUILD_DIR)/tty_service/tty_service: $(APPS_BUILD_DIR)/tty_service/tty_service.c.o $(CONFUSE_OBJS) apps/link/tty_service.ld
+	ld.lld -nostdlib -static -T apps/link/tty_service.ld -e _start -o $@ \
+	    $(MLIBC_CRT_OBJS) $(APPS_BUILD_DIR)/tty_service/tty_service.c.o $(CONFUSE_OBJS) $(MLIBC_LIBS)
+	$(STRIP) --strip-all $@
+
 MINIBOX_SRCS := $(filter-out apps/minibox/src/init.c,$(wildcard apps/minibox/src/*.c)) \
                 $(wildcard apps/minibox/libmb/*.c) apps/minibox/robu-stubs.c
 MINIBOX_OBJS := $(patsubst apps/minibox/%.c,$(APPS_BUILD_DIR)/minibox/%.c.o,$(MINIBOX_SRCS))
@@ -426,6 +435,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
                          $(APPS_BUILD_DIR)/vfs_mount/mount_sysfs \
                          $(APPS_BUILD_DIR)/vfs_mount/mount_tmpfs \
                          $(APPS_BUILD_DIR)/hello_initsys/hello_initsys \
+                         $(APPS_BUILD_DIR)/tty_service/tty_service \
                          $(APPS_BUILD_DIR)/minibox/minibox \
                          $(APPS_BUILD_DIR)/sh/sh \
                          $(APPS_BUILD_DIR)/stub/stub \
@@ -455,6 +465,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	cp $(APPS_BUILD_DIR)/am/am $(ROOTFS_STAGE)/bin/am
 	cp $(APPS_BUILD_DIR)/top/top $(ROOTFS_STAGE)/bin/top
 	cp $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(ROOTFS_STAGE)/usr/sbin/hello_initsys
+	cp $(APPS_BUILD_DIR)/tty_service/tty_service $(ROOTFS_STAGE)/sbin/tty_service
 	cp apps/hello_initsys/rc.conf $(ROOTFS_STAGE)/etc/rc.conf
 	cp etc/passwd $(ROOTFS_STAGE)/etc/passwd
 	cp $(APPS_BUILD_DIR)/minibox/minibox $(ROOTFS_STAGE)/bin/minibox

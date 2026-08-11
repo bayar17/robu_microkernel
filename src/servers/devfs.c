@@ -6,7 +6,15 @@ typedef enum {
     DEV_NULL = 1,
     DEV_ZERO = 2,
     DEV_RANDOM = 3,
+    DEV_RSTTY1 = 4,
+    DEV_RSTTY2 = 5,
+    DEV_RSTTY3 = 6,
+    DEV_RSTTY4 = 7,
+    DEV_RSTTY5 = 8,
+    DEV_RSTTY6 = 9,
 } dev_id_t;
+#define VT_COUNT 6
+#define SYS_INFO_CAT_ACTIVE_VT 16
 static int name_eq(const char *a, const char *b) {
     for (int i = 0; i < VFS_PATH_MAX; i++) {
         if (a[i] != b[i]) {
@@ -23,15 +31,36 @@ static int resolve_name(const char *name, dev_id_t *out) {
     if (name_eq(name, "null"))    { *out = DEV_NULL;    return 0; }
     if (name_eq(name, "zero"))    { *out = DEV_ZERO;    return 0; }
     if (name_eq(name, "random"))  { *out = DEV_RANDOM;  return 0; }
+    if (name_eq(name, "rstty1"))  { *out = DEV_RSTTY1;  return 0; }
+    if (name_eq(name, "rstty2"))  { *out = DEV_RSTTY2;  return 0; }
+    if (name_eq(name, "rstty3"))  { *out = DEV_RSTTY3;  return 0; }
+    if (name_eq(name, "rstty4"))  { *out = DEV_RSTTY4;  return 0; }
+    if (name_eq(name, "rstty5"))  { *out = DEV_RSTTY5;  return 0; }
+    if (name_eq(name, "rstty6"))  { *out = DEV_RSTTY6;  return 0; }
     return -1;
 }
 static int valid_handle(uint64_t h) {
-    return h == DEV_CONSOLE || h == DEV_NULL || h == DEV_ZERO || h == DEV_RANDOM;
+    return h <= DEV_RSTTY6;
 }
-static int devfs_kernel_console_write(const uint8_t *buf, uint64_t len) {
+static int dev_to_vt(dev_id_t id) {
+    if (id == DEV_CONSOLE) {
+        return 0;
+    }
+    if (id >= DEV_RSTTY1 && id <= DEV_RSTTY6) {
+        return (int)(id - DEV_RSTTY1);
+    }
+    return -1;
+}
+static int devfs_active_vt(void) {
+    msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = SYS_INFO_CAT_ACTIVE_VT;
+    robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+    return (int)m.word[0];
+}
+static int devfs_kernel_console_write(int vt, const uint8_t *buf, uint64_t len) {
     msg_regs_t m;
     uint64_t clamped = len > 40 ? 40 : len;
-    m.word[0] = clamped;
+    m.word[0] = clamped | ((uint64_t)vt << 8);
     uint64_t words[5] = {0, 0, 0, 0, 0};
     uint8_t *bytes = (uint8_t *)words;
     for (uint64_t i = 0; i < clamped; i++) {
@@ -44,8 +73,9 @@ static int devfs_kernel_console_write(const uint8_t *buf, uint64_t len) {
     m.word[5] = words[4];
     return (int)robu_ipc_raw(0, 0, IPC_FLAG_CONSOLE_WRITE, &m, NULL);
 }
-static int devfs_kernel_console_read(uint8_t *buf, uint64_t max) {
+static int devfs_kernel_console_read(int vt, uint8_t *buf, uint64_t max) {
     msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = (uint64_t)vt;
     int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_CONSOLE_READ, &m, NULL);
     if (rc != IPC_ERR_NONE) {
         return -1;
@@ -62,8 +92,8 @@ static int devfs_kernel_console_read(uint8_t *buf, uint64_t max) {
     return (int)n;
 }
 #define CONSOLE_LOCAL_BUF_SIZE 64
-static uint8_t console_local_buf[CONSOLE_LOCAL_BUF_SIZE];
-static uint32_t console_local_head, console_local_tail;
+static uint8_t console_local_buf[VT_COUNT][CONSOLE_LOCAL_BUF_SIZE];
+static uint32_t console_local_head[VT_COUNT], console_local_tail[VT_COUNT];
 static int rdrand_available;
 static void check_rdrand(void) {
     uint32_t ecx;
@@ -97,7 +127,10 @@ static void handle_open(msg_regs_t *m) {
     reply->status = 0;
     reply->handle = (uint64_t)id;
 }
-static int console_fg_read_allowed(tid_t from) {
+static int console_fg_read_allowed(tid_t from, int vt) {
+    if (vt != devfs_active_vt()) {
+        return 0;
+    }
     msg_regs_t q = (msg_regs_t){0};
     q.word[0] = SYS_INFO_CAT_TCGETPGRP;
     robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &q, NULL);
@@ -150,31 +183,38 @@ static void handle_read(msg_regs_t *m, tid_t from) {
         reply->status = (int64_t)got;
         break;
     }
-    case DEV_CONSOLE: {
-        if (!console_fg_read_allowed(from)) {
+    case DEV_CONSOLE:
+    case DEV_RSTTY1:
+    case DEV_RSTTY2:
+    case DEV_RSTTY3:
+    case DEV_RSTTY4:
+    case DEV_RSTTY5:
+    case DEV_RSTTY6: {
+        int vt = dev_to_vt((dev_id_t)handle);
+        if (!console_fg_read_allowed(from, vt)) {
             reply->status = 0;
             break;
         }
-        if (console_local_head == console_local_tail) {
+        if (console_local_head[vt] == console_local_tail[vt]) {
             uint8_t kbuf[VFS_READ_MAX];
-            int got = devfs_kernel_console_read(kbuf, sizeof(kbuf));
+            int got = devfs_kernel_console_read(vt, kbuf, sizeof(kbuf));
             if (got < 0) {
                 reply->status = VFS_ERR_NOT_SUPPORTED;
                 break;
             }
             for (int i = 0; i < got; i++) {
-                uint32_t next = (console_local_head + 1) % CONSOLE_LOCAL_BUF_SIZE;
-                if (next == console_local_tail) {
+                uint32_t next = (console_local_head[vt] + 1) % CONSOLE_LOCAL_BUF_SIZE;
+                if (next == console_local_tail[vt]) {
                     break;
                 }
-                console_local_buf[console_local_head] = kbuf[i];
-                console_local_head = next;
+                console_local_buf[vt][console_local_head[vt]] = kbuf[i];
+                console_local_head[vt] = next;
             }
         }
         int n = 0;
-        while ((uint64_t)n < len && console_local_head != console_local_tail) {
-            reply->data[n++] = console_local_buf[console_local_tail];
-            console_local_tail = (console_local_tail + 1) % CONSOLE_LOCAL_BUF_SIZE;
+        while ((uint64_t)n < len && console_local_head[vt] != console_local_tail[vt]) {
+            reply->data[n++] = console_local_buf[vt][console_local_tail[vt]];
+            console_local_tail[vt] = (console_local_tail[vt] + 1) % CONSOLE_LOCAL_BUF_SIZE;
         }
         reply->status = n;
         break;
@@ -198,26 +238,33 @@ static void handle_peek(msg_regs_t *m, tid_t from) {
     case DEV_RANDOM:
         reply->status = 1;
         break;
-    case DEV_CONSOLE: {
-        if (!console_fg_read_allowed(from)) {
+    case DEV_CONSOLE:
+    case DEV_RSTTY1:
+    case DEV_RSTTY2:
+    case DEV_RSTTY3:
+    case DEV_RSTTY4:
+    case DEV_RSTTY5:
+    case DEV_RSTTY6: {
+        int vt = dev_to_vt((dev_id_t)handle);
+        if (!console_fg_read_allowed(from, vt)) {
             reply->status = 0;
             break;
         }
-        if (console_local_head == console_local_tail) {
+        if (console_local_head[vt] == console_local_tail[vt]) {
             uint8_t kbuf[VFS_READ_MAX];
-            int got = devfs_kernel_console_read(kbuf, sizeof(kbuf));
+            int got = devfs_kernel_console_read(vt, kbuf, sizeof(kbuf));
             if (got > 0) {
                 for (int i = 0; i < got; i++) {
-                    uint32_t next = (console_local_head + 1) % CONSOLE_LOCAL_BUF_SIZE;
-                    if (next == console_local_tail) {
+                    uint32_t next = (console_local_head[vt] + 1) % CONSOLE_LOCAL_BUF_SIZE;
+                    if (next == console_local_tail[vt]) {
                         break;
                     }
-                    console_local_buf[console_local_head] = kbuf[i];
-                    console_local_head = next;
+                    console_local_buf[vt][console_local_head[vt]] = kbuf[i];
+                    console_local_head[vt] = next;
                 }
             }
         }
-        reply->status = console_local_head != console_local_tail ? 1 : 0;
+        reply->status = console_local_head[vt] != console_local_tail[vt] ? 1 : 0;
         break;
     }
     default:
@@ -245,7 +292,13 @@ static void handle_write(msg_regs_t *m) {
         reply->status = (int64_t)len;
         break;
     case DEV_CONSOLE:
-        devfs_kernel_console_write(data, len);
+    case DEV_RSTTY1:
+    case DEV_RSTTY2:
+    case DEV_RSTTY3:
+    case DEV_RSTTY4:
+    case DEV_RSTTY5:
+    case DEV_RSTTY6:
+        devfs_kernel_console_write(dev_to_vt((dev_id_t)handle), data, len);
         reply->status = (int64_t)len;
         break;
     }
@@ -257,7 +310,8 @@ static void handle_close(msg_regs_t *m) {
     reply->status = valid_handle(handle) ? 0 : VFS_ERR_BAD_HANDLE;
 }
 static void handle_readdir(msg_regs_t *m) {
-    static const char *const names[] = { "console", "null", "zero", "random" };
+    static const char *const names[] = { "console", "null", "zero", "random",
+                                          "rstty1", "rstty2", "rstty3", "rstty4", "rstty5", "rstty6" };
     const vfs_readdir_req_t *req = (const vfs_readdir_req_t *)m;
     uint64_t want = req->index;
     vfs_readdir_reply_t *reply = (vfs_readdir_reply_t *)m;
