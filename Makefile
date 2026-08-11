@@ -358,6 +358,7 @@ BASH_DIR := apps/bash
 BASH_BUILD_DIR := $(APPS_BUILD_DIR)/bash
 
 $(BASH_DIR)/config.h: $(BASH_DIR)/robu.cache mlibc readline $(READLINE_PREFIX)/lib/libreadline.a
+	rm -f $(BASH_DIR)/robu.cache
 	cd $(BASH_DIR) && CC="clang --target=x86_64-linux-gnu" \
 	    CC_FOR_BUILD=clang \
 	    CFLAGS="-ffreestanding -fPIC -fno-stack-protector -mno-red-zone -D_GNU_SOURCE -nostdinc -isystem $$(clang --print-resource-dir)/include -isystem $(MLIBC_SYSROOT)/usr/include" \
