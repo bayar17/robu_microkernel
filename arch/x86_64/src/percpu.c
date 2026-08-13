@@ -1,6 +1,7 @@
 #include "percpu.h"
+#include <stddef.h>
 percpu_t percpu_table[MAX_CPUS];
-#define PERCPU_OFFSETOF(field) ((uint64_t)&(((percpu_t *)0)->field))
+#define PERCPU_OFFSETOF(field) offsetof(percpu_t, field)
 _Static_assert(PERCPU_OFFSETOF(kstack_top) == PERCPU_OFF_KSTACK_TOP,
                "trap.S reads kstack_top at a hardcoded gs-relative offset");
 _Static_assert(PERCPU_OFFSETOF(trap_scratch) == PERCPU_OFF_TRAP_SCRATCH,
