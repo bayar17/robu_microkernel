@@ -1,10 +1,12 @@
+#include <stddef.h>
 #include "percpu.h"
 #include <stddef.h>
 percpu_t percpu_table[MAX_CPUS];
 #define PERCPU_OFFSETOF(field) offsetof(percpu_t, field)
 _Static_assert(PERCPU_OFFSETOF(kstack_top) == PERCPU_OFF_KSTACK_TOP,
+_Static_assert(offsetof(percpu_t, kstack_top) == PERCPU_OFF_KSTACK_TOP,
                "trap.S reads kstack_top at a hardcoded gs-relative offset");
-_Static_assert(PERCPU_OFFSETOF(trap_scratch) == PERCPU_OFF_TRAP_SCRATCH,
+_Static_assert(offsetof(percpu_t, trap_scratch) == PERCPU_OFF_TRAP_SCRATCH,
                "trap.S writes trap_scratch at a hardcoded gs-relative offset");
 #define IA32_GS_BASE 0xC0000101u
 static void wrmsr64(uint32_t msr, uint64_t value) {

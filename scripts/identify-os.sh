@@ -10,18 +10,13 @@ RESET='\033[0m'
 OS="$(uname -s)"
 KERNEL="$(uname -r)"
 
-if [ "$OS" = "Linux" ]; then
-    printf 'OS is %b%s%b, %b%s%b Kernel Version %s\n' \
-        "$YELLOW" "$OS" "$RESET" \
-        "$BLUE" "$OS" "$RESET" \
-        "$KERNEL"
+printf 'OS is %b%s%b, %b%s%b Kernel Version %s\n' \
+    "$BLUE" "$OS" "$RESET" \
+    "$BLUE" "$OS" "$RESET" \
+    "$KERNEL"
 
+if [ -n "$ROBU_IN_DOCKER" ]; then
     exec make "$@"
 else
-    printf 'OS is %b%s%b, %b%s%b Kernel Version %s\n' \
-        "$BLUE" "$OS" "$RESET" \
-        "$BLUE" "$OS" "$RESET" \
-        "$KERNEL"
-
     exec "$(dirname "$0")/build-docker.sh" "$@"
 fi

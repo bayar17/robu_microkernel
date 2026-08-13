@@ -57,17 +57,28 @@ _all: $(BUILD_DIR)/$(TARGET) $(BUILD_DIR)/rootfs.tar
 clean:
 	rm -rf $(BUILD_DIR)
 
+define GUARD_NATIVE_BUILD
+@if [ "$$(uname -s)" != "Linux" ]; then \
+    echo "error: kernel compilation is only allowed inside the Docker build container." >&2; \
+    echo "Use 'make all' or 'make iso' instead of building $@ directly." >&2; \
+    exit 1; \
+fi
+endef
+
 $(BUILD_DIR)/$(TARGET): $(OBJS)
+	$(GUARD_NATIVE_BUILD)
 	@mkdir -p $(@D)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 $(BUILD_DIR)/%.c.o: %.c
+	$(GUARD_NATIVE_BUILD)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/src/main.c.o:
 
 $(BUILD_DIR)/%.S.o: %.S
+	$(GUARD_NATIVE_BUILD)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -357,7 +368,7 @@ _readline: $(READLINE_BUILD_DIR)/libreadline.a
 BASH_DIR := apps/bash
 BASH_BUILD_DIR := $(APPS_BUILD_DIR)/bash
 
-$(BASH_DIR)/config.h: $(BASH_DIR)/robu.cache mlibc readline $(READLINE_PREFIX)/lib/libreadline.a
+$(BASH_DIR)/config.h: mlibc readline $(READLINE_PREFIX)/lib/libreadline.a
 	cd $(BASH_DIR) && CC="clang --target=x86_64-linux-gnu" \
 	    CC_FOR_BUILD=clang \
 	    CFLAGS="-ffreestanding -fPIC -fno-stack-protector -mno-red-zone -D_GNU_SOURCE -nostdinc -isystem $$(clang --print-resource-dir)/include -isystem $(MLIBC_SYSROOT)/usr/include" \

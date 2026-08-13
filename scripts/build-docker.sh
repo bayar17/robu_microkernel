@@ -17,7 +17,7 @@ IMAGE=robu-builder:latest
 
 "$ENGINE" build --platform=linux/amd64 -t "$IMAGE" -f scripts/robu-builder.Dockerfile . >&2
 
-"$ENGINE" run --rm --platform=linux/amd64 ${QEMU_APPEND+-e QEMU_APPEND} \
+"$ENGINE" run --rm --platform=linux/amd64 -e ROBU_IN_DOCKER=1 ${QEMU_APPEND+-e QEMU_APPEND} \
     -v "$(pwd)":/work -w /work "$IMAGE" \
     bash -c '
         set -e
