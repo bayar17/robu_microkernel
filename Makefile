@@ -537,6 +537,9 @@ run: $(BUILD_DIR)/robu_kernel.iso
 	    -drive file=$(QEMU_DISK),format=raw,if=none,id=blk0 \
 	    -device virtio-blk-pci,drive=blk0
 
+run-gui: $(BUILD_DIR)/robu_kernel.iso
+	./scripts/run-gui.sh $(BUILD_DIR)/robu_kernel.iso
+
 APP_BINS := $(APPS_BUILD_DIR)/procfs/procfs $(APPS_BUILD_DIR)/sysfs/sysfs \
             $(APPS_BUILD_DIR)/hello_initsys/hello_initsys $(APPS_BUILD_DIR)/minibox/minibox \
 
