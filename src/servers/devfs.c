@@ -183,6 +183,7 @@ static int console_fg_read_allowed(tid_t from, int vt) {
     }
     msg_regs_t q = (msg_regs_t){0};
     q.word[0] = SYS_INFO_CAT_TCGETPGRP;
+    q.word[1] = (uint64_t)vt;
     robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &q, NULL);
     tid_t fg = (tid_t)q.word[0];
     if (fg == 0) {

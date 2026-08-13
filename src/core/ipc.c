@@ -13,8 +13,9 @@
 #include "robu/arch.h"
 #include "robu/signal.h"
 static tid_t console_writer_tid = 0;
-static tid_t console_fg_pgid = 0;
+static tid_t console_driver_tid = 0;
 #define CONSOLE_VT_COUNT 6
+static tid_t console_fg_pgid[CONSOLE_VT_COUNT];
 static tid_t console_read_waiter[CONSOLE_VT_COUNT];
 
 static void complete_console_read(tcb_t *t, int vt) {
@@ -63,8 +64,6 @@ void ipc_console_interrupt(int vt, int signum) {
         return;
     }
 
-    sched_lock_acquire();
-
     tid_t waiter = console_read_waiter[vt];
     if (waiter != 0) {
         tcb_t *t = sched_get_tcb(waiter);
@@ -76,12 +75,14 @@ void ipc_console_interrupt(int vt, int signum) {
             console_read_waiter[vt] = 0;
         }
     }
-    sched_signal_pgid(console_fg_pgid, signum);
-    sched_lock_release();
+    sched_signal_pgid(console_fg_pgid[vt], signum);
 }
 
 void ipc_grant_console_writer(tid_t tid) {
     console_writer_tid = tid;
+}
+void ipc_grant_console_driver(tid_t tid) {
+    console_driver_tid = tid;
 }
 static tid_t blk_owner_tid = 0;
 void ipc_grant_blk_owner(tid_t tid) {
@@ -199,7 +200,7 @@ void sys_ipc(void) {
             return;
         }
         if (flags & IPC_FLAG_CONSOLE_WRITE) {
-            if (cur->tid != console_writer_tid) {
+            if (cur->tid != console_writer_tid && cur->tid != console_driver_tid) {
                 f->rax = (uint64_t)IPC_ERR_NO_CAP;
                 return;
             }
@@ -735,10 +736,70 @@ void sys_ipc(void) {
                 f->r8 = (uint64_t)cur->sid;
                 f->rax = (uint64_t)IPC_ERR_NONE;
             } else if (category == SYS_INFO_CAT_TCGETPGRP) {
-                f->r8 = (uint64_t)console_fg_pgid;
+                int vt = (int)f->r9;
+                if (vt < 0 || vt >= CONSOLE_VT_COUNT) {
+                    f->rax = (uint64_t)IPC_ERR_NOT_FOUND;
+                    return;
+                }
+                f->r8 = (uint64_t)console_fg_pgid[vt];
                 f->rax = (uint64_t)IPC_ERR_NONE;
             } else if (category == SYS_INFO_CAT_TCSETPGRP) {
-                console_fg_pgid = (tid_t)f->r9;
+                int vt = (int)f->r9;
+                if (vt < 0 || vt >= CONSOLE_VT_COUNT) {
+                    f->rax = (uint64_t)IPC_ERR_NOT_FOUND;
+                    return;
+                }
+                console_fg_pgid[vt] = (tid_t)f->r10;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_PORT_IO) {
+                if (cur->tid != console_driver_tid) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                uint16_t port = (uint16_t)f->r9;
+                int width = (int)f->r10;
+                int is_write = (int)f->r12;
+                uint64_t value = f->r13;
+                int64_t rc = arch_console_port_io(port, width, is_write, value);
+                if (rc < 0) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                f->r8 = (uint64_t)rc;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_CONSOLE_FEED) {
+                if (cur->tid != console_driver_tid) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                int vt = (int)(f->r9 >> 8);
+                uint64_t len = f->r9 & 0xFF;
+                if (len > 32) {
+                    len = 32;
+                }
+                uint64_t words[4] = { f->r10, f->r12, f->r13, f->r14 };
+                arch_console_feed_bytes(vt, (const uint8_t *)words, (int)len);
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_CONSOLE_SIGNAL_FG) {
+                if (cur->tid != console_driver_tid) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                ipc_console_interrupt((int)f->r9, (int)f->r10);
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SET_ACTIVE_VT) {
+                if (cur->tid != console_driver_tid) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                arch_console_switch_vt((int)f->r9);
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_CONSOLE_SCROLL) {
+                if (cur->tid != console_driver_tid) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                arch_console_scroll((int)(int64_t)f->r9);
                 f->rax = (uint64_t)IPC_ERR_NONE;
             } else {
                 f->rax = (uint64_t)IPC_ERR_NOT_FOUND;

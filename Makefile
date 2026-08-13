@@ -93,6 +93,14 @@ $(APPS_BUILD_DIR)/devfs/devfs: $(APPS_BUILD_DIR)/devfs/devfs.c.o $(APP_COMMON_OB
 	$(LD) $(APP_LDFLAGS) -T apps/link/devfs.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/devfs/devfs.c.o $(APP_COMMON_OBJ)
 
+$(APPS_BUILD_DIR)/console_driver/console_driver.c.o: src/servers/console_driver.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/console_driver/console_driver: $(APPS_BUILD_DIR)/console_driver/console_driver.c.o $(APP_COMMON_OBJ) apps/link/console_driver.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/console_driver.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/console_driver/console_driver.c.o $(APP_COMMON_OBJ)
+
 $(APPS_BUILD_DIR)/ramfs/ramfs.c.o: src/servers/ramfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -429,7 +437,8 @@ ROOTFS_MINIBOX_SYMLINKS := basename cal cat clear cmp cp cut date \
                             tty unexpand uniq unlink update uptime vmstat \
                             w wc whoami xxd yes
 
-$(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/ramfs \
+$(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console_driver/console_driver \
+                         $(APPS_BUILD_DIR)/ramfs/ramfs \
                          $(APPS_BUILD_DIR)/procfs/procfs $(APPS_BUILD_DIR)/sysfs/sysfs \
                          $(APPS_BUILD_DIR)/bootfs/bootfs $(APPS_BUILD_DIR)/diskfs/diskfs \
                          $(APPS_BUILD_DIR)/pager/pager \
@@ -457,6 +466,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/ramfs/r
 	mkdir -p $(ROOTFS_STAGE) $(ROOTFS_STAGE)/bin $(ROOTFS_STAGE)/sbin \
 	         $(ROOTFS_STAGE)/etc $(ROOTFS_STAGE)/usr/bin $(ROOTFS_STAGE)/usr/sbin
 	cp $(APPS_BUILD_DIR)/devfs/devfs $(ROOTFS_STAGE)/devfs
+	cp $(APPS_BUILD_DIR)/console_driver/console_driver $(ROOTFS_STAGE)/console_driver
 	cp $(APPS_BUILD_DIR)/ramfs/ramfs $(ROOTFS_STAGE)/ramfs
 	cp $(APPS_BUILD_DIR)/procfs/procfs $(ROOTFS_STAGE)/procfs
 	cp $(APPS_BUILD_DIR)/sysfs/sysfs $(ROOTFS_STAGE)/sysfs

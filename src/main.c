@@ -24,17 +24,6 @@
 
 int quiet_mode;
 
-static uint8_t stack_console_in[STACK_SIZE] __attribute__((aligned(16)));
-static void console_in_entry(void) {
-    for (;;) {
-        int c;
-        while ((c = arch_console_getc()) >= 0) {
-            arch_console_line_feed(c);
-        }
-        ipc_sleep(1);
-    }
-}
-
 static uint8_t stack_monitor[STACK_SIZE] __attribute__((aligned(16)));
 static void monitor_entry(void) {
     msg_regs_t m;
@@ -161,9 +150,9 @@ void kmain(void) {
     pager_init();
     thread_create("monitor", monitor_entry, stack_monitor + STACK_SIZE, 14);
     test_report_init();
-    thread_create("console-in", console_in_entry, stack_console_in + STACK_SIZE, 20);
     root_task_init(untyped_base, UNTYPED_REGION_SIZE);
     devfs_init();
+    console_driver_init();
     ramfs_init();
     procfs_init();
     sysfs_init();

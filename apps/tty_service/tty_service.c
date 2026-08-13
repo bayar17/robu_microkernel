@@ -13,7 +13,7 @@ static int try_open(const char *name) {
     return open(path, O_RDWR);
 }
 
-int main(void) {
+int main(int argc, char **rc_argv) {
     static char rc_shell[64] = "sh";
     static char rc_tty[32] = "auto";
 
@@ -38,6 +38,10 @@ int main(void) {
                 rc_tty[sizeof(rc_tty) - 1] = '\0';
             }
         }
+    }
+    if (argc > 1) {
+        strncpy(rc_tty, rc_argv[1], sizeof(rc_tty) - 1);
+        rc_tty[sizeof(rc_tty) - 1] = '\0';
     }
 
     char chosen[32] = "";
@@ -71,8 +75,13 @@ int main(void) {
 
     if (tty_fd >= 0) {
         setpgid(0, 0);
-        tcsetpgrp(tty_fd, getpgrp());
-        close(tty_fd);
+        dup2(tty_fd, 0);
+        dup2(tty_fd, 1);
+        dup2(tty_fd, 2);
+        if (tty_fd > 2) {
+            close(tty_fd);
+        }
+        tcsetpgrp(0, getpgrp());
     }
 
     char shell_path[80];

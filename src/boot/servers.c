@@ -48,6 +48,22 @@ tid_t devfs_init(void) {
     return devfs->tid;
 }
 
+tid_t console_driver_init(void) {
+    const uint8_t *cd_elf_start, *cd_elf_end;
+    if (rootfs_lookup("console_driver", &cd_elf_start, &cd_elf_end) != 0) {
+        kprintf("[boot] FATAL: rootfs has no entry named 'console_driver'\n");
+        for (;;) { asm volatile("cli; hlt"); }
+    }
+    tcb_t *cd = elf_load_and_spawn("console_driver", cd_elf_start, cd_elf_end, 20, PAGER_TID);
+    if (!cd) {
+        kprintf("[boot] FATAL: console_driver server failed to load\n");
+        for (;;) { asm volatile("cli; hlt"); }
+    }
+    ipc_grant_console_driver(cd->tid);
+    kprintf("[boot] console_driver server: tid=%u, granted port-io/console-driver permission\n", cd->tid);
+    return cd->tid;
+}
+
 tid_t ramfs_init(void) {
     const uint8_t *ramfs_elf_start, *ramfs_elf_end;
     if (rootfs_lookup("ramfs", &ramfs_elf_start, &ramfs_elf_end) != 0) {

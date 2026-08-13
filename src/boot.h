@@ -39,6 +39,7 @@ void ramfs_extract_tree(void);
 
 tid_t pager_init(void);
 tid_t devfs_init(void);
+tid_t console_driver_init(void);
 tid_t ramfs_init(void);
 tid_t procfs_init(void);
 tid_t sysfs_init(void);

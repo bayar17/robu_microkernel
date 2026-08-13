@@ -9,6 +9,24 @@ extern int __libc_spawn(const char *name, char *const argv[], char *const envp[]
 
 #define RC_CONF_PATH "/etc/rc.conf"
 
+#define GETTY_COUNT 6
+static const char *const getty_ttys[GETTY_COUNT] = {
+    "rstty1", "rstty2", "rstty3", "rstty4", "rstty5", "rstty6"
+};
+static pid_t getty_pid[GETTY_COUNT];
+
+static void spawn_getty(int i) {
+    char *const svc_argv[] = { (char *)"tty_service", (char *)getty_ttys[i], 0 };
+    int rc = __libc_spawn("tty_service", svc_argv, environ);
+    if (rc < 0) {
+        printf("[hello_initsys] failed to start tty_service for %s\n", getty_ttys[i]);
+        getty_pid[i] = -1;
+        return;
+    }
+    getty_pid[i] = rc;
+    printf("[hello_initsys] started 'tty_service' for %s as tid=%d\n", getty_ttys[i], rc);
+}
+
 static void run_service(const char *name) {
     char *const svc_argv[] = { (char *)name, 0 };
     int rc = __libc_spawn(name, svc_argv, environ);
@@ -71,37 +89,59 @@ int main(int argc, char **argv) {
         run_service("mount_tmpfs");
     }
 
-    char *default_argv[] = { (char *)"tty_service", 0 };
-    const char *name;
-    char **cmd_argv;
     if (argc > 1) {
-        name = argv[1];
-        cmd_argv = argv + 1;
+        const char *name = argv[1];
+        char **cmd_argv = argv + 1;
+        do {
+            int rc = __libc_spawn(name, cmd_argv, environ);
+            if (rc < 0) {
+                printf("[hello_initsys] failed to start '%s'\n", name);
+                sleep(1);
+                continue;
+            }
+            printf("[hello_initsys] started '%s' as tid=%d\n", name, rc);
+            for (;;) {
+                int status;
+                pid_t child = wait(&status);
+                if (child < 0) {
+                    break;
+                }
+                printf("[hello_initsys] tid=%d exited status=%d\n", child, WEXITSTATUS(status));
+                if (child == rc) {
+                    break;
+                }
+            }
+        } while (rc_respawn);
     } else {
-        name = "tty_service";
-        cmd_argv = default_argv;
-    }
-
-    do {
-        int rc = __libc_spawn(name, cmd_argv, environ);
-        if (rc < 0) {
-            printf("[hello_initsys] failed to start '%s'\n", name);
-            sleep(1);
-            continue;
+        for (int i = 0; i < GETTY_COUNT; i++) {
+            spawn_getty(i);
         }
-        printf("[hello_initsys] started '%s' as tid=%d\n", name, rc);
         for (;;) {
             int status;
             pid_t child = wait(&status);
             if (child < 0) {
                 break;
             }
-            printf("[hello_initsys] tid=%d exited status=%d\n", child, WEXITSTATUS(status));
-            if (child == rc) {
-                break;
+            int idx = -1;
+            for (int i = 0; i < GETTY_COUNT; i++) {
+                if (getty_pid[i] == child) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx < 0) {
+                printf("[hello_initsys] tid=%d exited status=%d\n", child, WEXITSTATUS(status));
+                continue;
+            }
+            printf("[hello_initsys] tty_service for %s (tid=%d) exited status=%d\n",
+                   getty_ttys[idx], child, WEXITSTATUS(status));
+            if (rc_respawn) {
+                spawn_getty(idx);
+            } else {
+                getty_pid[idx] = -1;
             }
         }
-    } while (rc_respawn);
+    }
 
     printf("[hello_initsys] respawn disabled, init exiting\n");
     return 0;
