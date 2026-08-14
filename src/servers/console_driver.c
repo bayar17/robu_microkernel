@@ -24,6 +24,28 @@ static int port_io_read(uint16_t port, int width) {
     return (int)(int64_t)m.word[0];
 }
 
+static void port_io_write(uint16_t port, int width, uint64_t value) {
+    msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = SYS_INFO_CAT_PORT_IO;
+    m.word[1] = port;
+    m.word[2] = (uint64_t)width;
+    m.word[3] = 1;
+    m.word[4] = value;
+    robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+}
+
+static int serial_present(void) {
+    port_io_write(COM1 + 7, 1, 0xAA);
+    if (port_io_read(COM1 + 7, 1) != 0xAA) {
+        return 0;
+    }
+    port_io_write(COM1 + 7, 1, 0x55);
+    if (port_io_read(COM1 + 7, 1) != 0x55) {
+        return 0;
+    }
+    return 1;
+}
+
 static void console_feed(int vt, const uint8_t *buf, int len) {
     int off = 0;
     while (off < len) {
@@ -226,8 +248,13 @@ static int serial_getc(void) {
     return port_io_read(COM1, 1);
 }
 
+static int g_serial_present = -1;
+
 static int getc_raw(void) {
-    int c = serial_getc();
+    if (g_serial_present < 0) {
+        g_serial_present = serial_present();
+    }
+    int c = g_serial_present ? serial_getc() : -1;
     if (c >= 0) {
         return c;
     }
