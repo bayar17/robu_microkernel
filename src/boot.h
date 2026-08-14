@@ -58,6 +58,7 @@ void consoletest_init(void);
 void mousetest_init(void);
 void fbtest_init(void);
 void shmtest_init(void);
+void socktest_init(void);
 void sigtest_init(void);
 void readlinetest_init(void);
 void toybox_sh_c_init(void);

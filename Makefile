@@ -219,6 +219,22 @@ $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer: $(APPS_BUILD_DIR)/shmtest_c
 	$(LD) $(APP_LDFLAGS) -T apps/link/shmtest_consumer.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer.c.o
 
+$(APPS_BUILD_DIR)/socktest_server/socktest_server.c.o: tests/socktest/socktest_server.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/socktest_server/socktest_server: $(APPS_BUILD_DIR)/socktest_server/socktest_server.c.o apps/link/socktest_server.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/socktest_server.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/socktest_server/socktest_server.c.o
+
+$(APPS_BUILD_DIR)/socktest_client/socktest_client.c.o: tests/socktest/socktest_client.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/socktest_client/socktest_client: $(APPS_BUILD_DIR)/socktest_client/socktest_client.c.o apps/link/socktest_client.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/socktest_client.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/socktest_client/socktest_client.c.o
+
 $(APPS_BUILD_DIR)/vfs_mount/mount_devfs.c.o: apps/vfs_mount/mount_devfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -483,6 +499,8 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
                          $(APPS_BUILD_DIR)/fbtest/fbtest \
                          $(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer \
                          $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer \
+                         $(APPS_BUILD_DIR)/socktest_server/socktest_server \
+                         $(APPS_BUILD_DIR)/socktest_client/socktest_client \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
                          $(APPS_BUILD_DIR)/am/am \
                          $(APPS_BUILD_DIR)/top/top \
@@ -515,6 +533,8 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
 	cp $(APPS_BUILD_DIR)/fbtest/fbtest $(ROOTFS_STAGE)/fbtest
 	cp $(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer $(ROOTFS_STAGE)/shmtest_producer
 	cp $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer $(ROOTFS_STAGE)/shmtest_consumer
+	cp $(APPS_BUILD_DIR)/socktest_server/socktest_server $(ROOTFS_STAGE)/socktest_server
+	cp $(APPS_BUILD_DIR)/socktest_client/socktest_client $(ROOTFS_STAGE)/socktest_client
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
 	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
 	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/sbin/reboot

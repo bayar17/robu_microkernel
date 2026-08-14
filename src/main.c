@@ -203,6 +203,7 @@ void kmain(void) {
     mousetest_init();
     fbtest_init();
     shmtest_init();
+    socktest_init();
     readlinetest_init();
     toybox_sh_c_init();
 

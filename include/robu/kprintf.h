@@ -36,4 +36,12 @@ int arch_console_mouse_read(uint64_t *out, int max);
 #define SYS_INFO_CAT_SHM_AT  26
 #define SYS_INFO_CAT_SHM_DT  27
 #define SYS_INFO_CAT_SHM_CTL 28
+#define SYS_INFO_CAT_SOCK_CREATE  29
+#define SYS_INFO_CAT_SOCK_BIND    30
+#define SYS_INFO_CAT_SOCK_LISTEN  31
+#define SYS_INFO_CAT_SOCK_CONNECT 32
+#define SYS_INFO_CAT_SOCK_ACCEPT  33
+#define SYS_INFO_CAT_SOCK_READ    34
+#define SYS_INFO_CAT_SOCK_WRITE   35
+#define SYS_INFO_CAT_SOCK_CLOSE   36
 #endif

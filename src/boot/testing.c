@@ -150,6 +150,12 @@ static void test_report_entry(void) {
                     who, m.word[2], m.word[1], m.word[3]);
             break;
         }
+        case TEST_REPORT_KIND_SOCK_TEST: {
+            const char *who = m.word[4] == 1 ? "server" : "client";
+            kprintf("[sock-test] %s: %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    who, m.word[2], m.word[1], m.word[3]);
+            break;
+        }
         default:
             kprintf("[test-report] unknown report kind=%lu from tid=%u\n", m.word[0], from);
             break;
@@ -369,6 +375,14 @@ void shmtest_init(void) {
     }
     toybox_spawn("shmtest_producer", 1, (const char *const[]){ "shmtest_producer" }, 9);
     toybox_spawn("shmtest_consumer", 1, (const char *const[]){ "shmtest_consumer" }, 9);
+}
+
+void socktest_init(void) {
+    if (!cmdline_get("socktest")) {
+        return;
+    }
+    toybox_spawn("socktest_server", 1, (const char *const[]){ "socktest_server" }, 9);
+    toybox_spawn("socktest_client", 1, (const char *const[]){ "socktest_client" }, 9);
 }
 
 void readlinetest_init(void) {

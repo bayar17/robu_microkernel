@@ -10,6 +10,7 @@
 #include "robu/pipe.h"
 #include "robu/signal.h"
 #include "robu/shm.h"
+#include "robu/socket.h"
 #include "percpu.h"
 extern volatile uint32_t cpu_online[MAX_CPUS];
 sched_stats_t sched_stats;
@@ -208,6 +209,7 @@ static void terminate_tcb(tcb_t *t, thread_state_t final_state) {
     kcap_invalidate_tcb_death(t->tid);
     notif_invalidate_waiter_death(t->tid);
     pipe_invalidate_tcb_death(t->tid);
+    sock_cleanup_for_process(t->tid);
 }
 void sched_terminate_current(void) {
     sched_terminate_to(THREAD_STATE_DEAD);

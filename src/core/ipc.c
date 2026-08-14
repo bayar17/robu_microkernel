@@ -14,6 +14,7 @@
 #include "robu/signal.h"
 #include "robu/framebuffer.h"
 #include "robu/shm.h"
+#include "robu/socket.h"
 static tid_t console_writer_tid = 0;
 static tid_t console_driver_tid = 0;
 #define CONSOLE_VT_COUNT 6
@@ -898,6 +899,89 @@ void sys_ipc(void) {
                 f->r13 = out_words[4];
                 f->r14 = out_words[5];
                 f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SOCK_CREATE) {
+                int id = -1;
+                int rc = sock_create(cur->tid, (int)f->r9, (int)f->r10, &id);
+                if (rc != IPC_ERR_NONE) {
+                    f->rax = (uint64_t)rc;
+                    return;
+                }
+                f->r8 = (uint64_t)(int64_t)id;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SOCK_BIND) {
+                char path[SOCK_PATH_MAX];
+                uint64_t words[4] = { f->r10, f->r12, f->r13, f->r14 };
+                for (int wi = 0; wi < 4; wi++) {
+                    for (int bi = 0; bi < 8; bi++) {
+                        path[wi * 8 + bi] = (char)(uint8_t)(words[wi] >> (8 * bi));
+                    }
+                }
+                path[SOCK_PATH_MAX - 1] = '\0';
+                f->rax = (uint64_t)sock_bind(cur->tid, (int)(int64_t)f->r9, path);
+            } else if (category == SYS_INFO_CAT_SOCK_LISTEN) {
+                f->rax = (uint64_t)sock_listen(cur->tid, (int)(int64_t)f->r9, (int)f->r10);
+            } else if (category == SYS_INFO_CAT_SOCK_CONNECT) {
+                char path[SOCK_PATH_MAX];
+                uint64_t words[4] = { f->r10, f->r12, f->r13, f->r14 };
+                for (int wi = 0; wi < 4; wi++) {
+                    for (int bi = 0; bi < 8; bi++) {
+                        path[wi * 8 + bi] = (char)(uint8_t)(words[wi] >> (8 * bi));
+                    }
+                }
+                path[SOCK_PATH_MAX - 1] = '\0';
+                f->rax = (uint64_t)sock_connect(cur->tid, (int)(int64_t)f->r9, path);
+            } else if (category == SYS_INFO_CAT_SOCK_ACCEPT) {
+                int new_id = -1;
+                int rc = sock_accept(cur->tid, (int)(int64_t)f->r9, &new_id);
+                if (rc != IPC_ERR_NONE) {
+                    f->rax = (uint64_t)rc;
+                    return;
+                }
+                f->r8 = (uint64_t)(int64_t)new_id;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SOCK_READ) {
+                uint8_t buf[40] = {0};
+                int max = (int)f->r10;
+                if (max > 40) {
+                    max = 40;
+                }
+                int n = 0;
+                int rc = sock_read((int)(int64_t)f->r9, buf, max, &n);
+                if (rc != IPC_ERR_NONE) {
+                    f->rax = (uint64_t)rc;
+                    return;
+                }
+                uint64_t words[5] = {0, 0, 0, 0, 0};
+                for (int i = 0; i < n; i++) {
+                    words[i / 8] |= ((uint64_t)buf[i]) << (8 * (i % 8));
+                }
+                f->r8 = (uint64_t)n;
+                f->r9 = words[0];
+                f->r10 = words[1];
+                f->r12 = words[2];
+                f->r13 = words[3];
+                f->r14 = words[4];
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SOCK_WRITE) {
+                uint8_t buf[24];
+                int len = (int)f->r10;
+                if (len > 24) {
+                    len = 24;
+                }
+                uint64_t words[3] = { f->r12, f->r13, f->r14 };
+                for (int i = 0; i < len; i++) {
+                    buf[i] = (uint8_t)(words[i / 8] >> (8 * (i % 8)));
+                }
+                int n = 0;
+                int rc = sock_write((int)(int64_t)f->r9, buf, len, &n);
+                if (rc != IPC_ERR_NONE) {
+                    f->rax = (uint64_t)rc;
+                    return;
+                }
+                f->r8 = (uint64_t)n;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SOCK_CLOSE) {
+                f->rax = (uint64_t)sock_close(cur->tid, (int)(int64_t)f->r9);
             } else {
                 f->rax = (uint64_t)IPC_ERR_NOT_FOUND;
             }
