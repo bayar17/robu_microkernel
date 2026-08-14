@@ -13,6 +13,7 @@
 #define SYS_INFO_CAT_CONSOLE_SIGNAL_FG 19
 #define SYS_INFO_CAT_SET_ACTIVE_VT 20
 #define SYS_INFO_CAT_CONSOLE_SCROLL 21
+#define SYS_INFO_CAT_MOUSE_FEED 22
 
 static int port_io_read(uint16_t port, int width) {
     msg_regs_t m = (msg_regs_t){0};
@@ -162,13 +163,101 @@ static int extended_key_to_ansi(uint8_t scancode) {
     }
 }
 
+static void mouse_feed(uint64_t packed_event) {
+    msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = SYS_INFO_CAT_MOUSE_FEED;
+    m.word[1] = packed_event;
+    robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+}
+
+static uint8_t mouse_packet[3];
+static int mouse_packet_pos = 0;
+
+static void ps2_mouse_accumulate(uint8_t b) {
+    if (mouse_packet_pos == 0 && !(b & 0x08)) {
+        return;
+    }
+    mouse_packet[mouse_packet_pos++] = b;
+    if (mouse_packet_pos < 3) {
+        return;
+    }
+    mouse_packet_pos = 0;
+    int dx = mouse_packet[1];
+    int dy = mouse_packet[2];
+    if (mouse_packet[0] & 0x10) {
+        dx -= 256;
+    }
+    if (mouse_packet[0] & 0x20) {
+        dy -= 256;
+    }
+    uint8_t buttons = mouse_packet[0] & 0x07;
+    uint64_t packed = ((uint64_t)(uint16_t)dx & 0xFFFF)
+                     | (((uint64_t)(uint16_t)dy & 0xFFFF) << 16)
+                     | ((uint64_t)buttons << 32);
+    mouse_feed(packed);
+}
+
+#define PS2_INIT_SPIN_MAX 200
+
+static int ps2_mouse_wait_ack(void) {
+    for (int i = 0; i < PS2_INIT_SPIN_MAX; i++) {
+        int status = port_io_read(0x64, 1);
+        if (status & 0x01) {
+            uint8_t byte = (uint8_t)port_io_read(0x60, 1);
+            if (status & 0x20) {
+                return byte == 0xFA;
+            }
+        }
+    }
+    return 0;
+}
+
+static void ps2_mouse_init(void) {
+    port_io_write(0x64, 1, 0xA8);
+
+    port_io_write(0x64, 1, 0x20);
+    int spins = 0;
+    while (!(port_io_read(0x64, 1) & 0x01) && spins < PS2_INIT_SPIN_MAX) {
+        spins++;
+    }
+    if (spins >= PS2_INIT_SPIN_MAX) {
+        return;
+    }
+    uint8_t config = (uint8_t)port_io_read(0x60, 1);
+
+    config &= (uint8_t)~0x20;
+    config &= (uint8_t)~0x01;
+    config |= 0x02;
+
+    port_io_write(0x64, 1, 0x60);
+    port_io_write(0x60, 1, config);
+
+    port_io_write(0x64, 1, 0xD4);
+    port_io_write(0x60, 1, 0xF6);
+    if (!ps2_mouse_wait_ack()) {
+        return;
+    }
+
+    port_io_write(0x64, 1, 0xD4);
+    port_io_write(0x60, 1, 0xF4);
+    if (!ps2_mouse_wait_ack()) {
+        return;
+    }
+}
+
 static int ps2_getc(void) {
     if (pending_pos < pending_len) {
         return (int)(uint8_t)pending_bytes[pending_pos++];
     }
     pending_len = 0;
     pending_pos = 0;
-    if (!(port_io_read(0x64, 1) & 0x01)) {
+    int status = port_io_read(0x64, 1);
+    if (!(status & 0x01)) {
+        return -1;
+    }
+    if (status & 0x20) {
+        uint8_t mbyte = (uint8_t)port_io_read(0x60, 1);
+        ps2_mouse_accumulate(mbyte);
         return -1;
     }
     uint8_t scancode = (uint8_t)port_io_read(0x60, 1);
@@ -322,6 +411,7 @@ static void line_feed(int c) {
 }
 
 void _start(void) {
+    ps2_mouse_init();
     for (;;) {
         int c;
         while ((c = getc_raw()) >= 0) {
