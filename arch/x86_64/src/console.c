@@ -244,6 +244,9 @@ static void vga_putc(int vt, char c) {
         g->live_screen[g->live_row][g->live_col] = (uint16_t)((g->vga_attr << 8) | ' ');
         return;
     }
+    if ((uint8_t)c < 0x20) {
+        return;
+    }
 
     g->live_screen[g->live_row][g->live_col] = (uint16_t)((g->vga_attr << 8) | (uint8_t)c);
 
