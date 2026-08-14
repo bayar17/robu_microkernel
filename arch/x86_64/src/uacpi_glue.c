@@ -42,16 +42,8 @@ void *uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len) {
 }
 
 void uacpi_kernel_unmap(void *addr, uacpi_size len) {
-    paddr_t start = (paddr_t)addr;
-    if (start + len <= ROBU_IDENTITY_MAP_LIMIT) {
-        return;
-    }
-    paddr_t page_base = start & ~(PAGE_SIZE_4K - 1);
-    uint64_t offset = start - page_base;
-    uint64_t map_len = (offset + len + PAGE_SIZE_4K - 1) & ~(PAGE_SIZE_4K - 1);
-    for (uint64_t off = 0; off < map_len; off += PAGE_SIZE_4K) {
-        arch_vm_unmap_page((paddr_t)&boot_pml4, page_base + off);
-    }
+    (void)addr;
+    (void)len;
 }
 
 void uacpi_kernel_log(uacpi_log_level level, const uacpi_char *msg) {
