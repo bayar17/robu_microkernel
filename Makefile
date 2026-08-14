@@ -285,12 +285,45 @@ _mlibc:
 	PATH="$(MLIBC_TOOLCHAIN_PATH)" ninja -C $(MLIBC_BUILD_DIR)
 	DESTDIR=$(MLIBC_SYSROOT) PATH="$(MLIBC_TOOLCHAIN_PATH)" ninja -C $(MLIBC_BUILD_DIR) install
 
+PIXMAN_DIR := apps/pixman
+PIXMAN_BUILD_DIR := $(BUILD_DIR)/pixman
+PIXMAN_CROSS := $(BUILD_DIR)/pixman-robu-cross.ini
+
+$(PIXMAN_CROSS): apps/pixman-robu-cross.ini.in
+	@mkdir -p $(BUILD_DIR)
+	sed 's|@MLIBC_SYSROOT@|$(MLIBC_SYSROOT)|g' $< > $@
+
+pixman: mlibc $(PIXMAN_CROSS)
+	./scripts/identify-os.sh _pixman
+
+_pixman: mlibc $(PIXMAN_CROSS)
+	@if [ ! -f $(PIXMAN_BUILD_DIR)/build.ninja ]; then \
+	    PATH="$(MLIBC_TOOLCHAIN_PATH)" meson setup $(PIXMAN_BUILD_DIR) $(PIXMAN_DIR) --cross-file $(PIXMAN_CROSS) \
+	        --default-library=static -Dopenmp=disabled -Dgtk=disabled -Dlibpng=disabled \
+	        -Dtests=disabled -Ddemos=disabled; \
+	fi
+	PATH="$(MLIBC_TOOLCHAIN_PATH)" ninja -C $(PIXMAN_BUILD_DIR)
+
 MLIBC_APP_CFLAGS := --target=x86_64-linux-gnu -ffreestanding -fPIC -fno-stack-protector \
                      -mno-red-zone -D_GNU_SOURCE -Wall -Wextra \
                      -isystem $(MLIBC_SYSROOT)/usr/include
 
 MLIBC_CRT_OBJS := $(MLIBC_SYSROOT)/usr/lib/crt1.o
 MLIBC_LIBS := --start-group $(MLIBC_SYSROOT)/usr/lib/libc.a $(MLIBC_SYSROOT)/usr/lib/libm.a --end-group
+
+PIXMAN_LIBS := $(PIXMAN_BUILD_DIR)/pixman/libpixman-1.a \
+               $(PIXMAN_BUILD_DIR)/pixman/libpixman-mmx.a \
+               $(PIXMAN_BUILD_DIR)/pixman/libpixman-sse2.a \
+               $(PIXMAN_BUILD_DIR)/pixman/libpixman-ssse3.a
+
+$(APPS_BUILD_DIR)/pixmantest/pixmantest.c.o: tests/pixmantest/pixmantest.c mlibc
+	@mkdir -p $(@D)
+	$(CC) $(MLIBC_APP_CFLAGS) -I$(PIXMAN_DIR)/pixman -I$(PIXMAN_BUILD_DIR)/pixman -c $< -o $@
+
+$(APPS_BUILD_DIR)/pixmantest/pixmantest: $(APPS_BUILD_DIR)/pixmantest/pixmantest.c.o apps/link/pixmantest.ld pixman
+	ld.lld -nostdlib -static -T apps/link/pixmantest.ld -e _start -o $@ \
+	    $(MLIBC_CRT_OBJS) $(APPS_BUILD_DIR)/pixmantest/pixmantest.c.o $(PIXMAN_LIBS) $(MLIBC_LIBS)
+	$(STRIP) --strip-all $@
 
 CONFUSE_DIR := apps/confuse/src
 CONFUSE_BUILD_DIR := $(APPS_BUILD_DIR)/confuse
@@ -502,6 +535,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
                          $(APPS_BUILD_DIR)/socktest_server/socktest_server \
                          $(APPS_BUILD_DIR)/socktest_client/socktest_client \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
+                         $(APPS_BUILD_DIR)/pixmantest/pixmantest \
                          $(APPS_BUILD_DIR)/am/am \
                          $(APPS_BUILD_DIR)/top/top \
                          $(APPS_BUILD_DIR)/readlinetest/readlinetest \
@@ -536,6 +570,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
 	cp $(APPS_BUILD_DIR)/socktest_server/socktest_server $(ROOTFS_STAGE)/socktest_server
 	cp $(APPS_BUILD_DIR)/socktest_client/socktest_client $(ROOTFS_STAGE)/socktest_client
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
+	cp $(APPS_BUILD_DIR)/pixmantest/pixmantest $(ROOTFS_STAGE)/pixmantest
 	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
 	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/sbin/reboot
 	cp $(APPS_BUILD_DIR)/powertools/halt $(ROOTFS_STAGE)/sbin/halt

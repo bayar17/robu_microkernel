@@ -1,0 +1,17 @@
+[binaries]
+c = 'clang'
+cpp = 'clang++'
+ar = 'llvm-ar'
+strip = 'llvm-strip'
+pkg-config = 'false'
+
+[host_machine]
+system = 'robu'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+
+[built-in options]
+
+c_args = ['--target=x86_64-linux-gnu', '-ffreestanding', '-fPIC', '-fno-stack-protector', '-mno-red-zone', '-D_GNU_SOURCE', '-isystem', '@MLIBC_SYSROOT@/usr/include']
+c_link_args = ['--target=x86_64-linux-gnu', '-fuse-ld=lld']

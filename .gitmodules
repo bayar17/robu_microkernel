@@ -19,3 +19,6 @@
 [submodule "apps/xserver"]
 	path = apps/xserver
 	url = https://github.com/bayar17/xserver.git
+[submodule "apps/pixman"]
+	path = apps/pixman
+	url = https://github.com/bayar17/pixman.git
