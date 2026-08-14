@@ -16,10 +16,26 @@ static void serial_init(void) {
     outb(COM1 + 3, 0x03);
     outb(COM1 + 2, 0xC7);
     outb(COM1 + 4, 0x0B);
+    outb(COM1 + 7, 0xAA);
+    serial_present = (inb(COM1 + 7) == 0xAA);
+    if (serial_present) {
+        outb(COM1 + 7, 0x55);
+        serial_present = (inb(COM1 + 7) == 0x55);
+    }
 }
 
+#define SERIAL_READY_SPIN_MAX 100000
+
 static void serial_putc(char c) {
-    while (!(inb(COM1 + 5) & 0x20)) {}
+    if (!serial_present) {
+        return;
+    }
+    uint32_t spins = 0;
+    while (!(inb(COM1 + 5) & 0x20)) {
+        if (++spins >= SERIAL_READY_SPIN_MAX) {
+            return;
+        }
+    }
     outb(COM1, (uint8_t)c);
 }
 
