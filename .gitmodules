@@ -22,3 +22,9 @@
 [submodule "apps/pixman"]
 	path = apps/pixman
 	url = https://github.com/bayar17/pixman.git
+[submodule "apps/xorgproto"]
+	path = apps/xorgproto
+	url = https://github.com/bayar17/xorgproto.git
+[submodule "apps/xtrans"]
+	path = apps/xtrans
+	url = https://github.com/bayar17/libxtrans.git

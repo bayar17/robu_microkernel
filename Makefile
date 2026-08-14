@@ -304,6 +304,21 @@ _pixman: mlibc $(PIXMAN_CROSS)
 	fi
 	PATH="$(MLIBC_TOOLCHAIN_PATH)" ninja -C $(PIXMAN_BUILD_DIR)
 
+XORGPROTO_DIR := apps/xorgproto
+XORGPROTO_BUILD_DIR := $(BUILD_DIR)/xorgproto
+XORGPROTO_PREFIX := $(abspath $(BUILD_DIR)/xorgproto-install)
+
+xorgproto: mlibc $(PIXMAN_CROSS)
+	./scripts/identify-os.sh _xorgproto
+
+_xorgproto: mlibc $(PIXMAN_CROSS)
+	@if [ ! -f $(XORGPROTO_BUILD_DIR)/build.ninja ]; then \
+	    PATH="$(MLIBC_TOOLCHAIN_PATH)" meson setup $(XORGPROTO_BUILD_DIR) $(XORGPROTO_DIR) --cross-file $(PIXMAN_CROSS) \
+	        --prefix=$(XORGPROTO_PREFIX); \
+	fi
+	PATH="$(MLIBC_TOOLCHAIN_PATH)" ninja -C $(XORGPROTO_BUILD_DIR)
+	PATH="$(MLIBC_TOOLCHAIN_PATH)" ninja -C $(XORGPROTO_BUILD_DIR) install
+
 MLIBC_APP_CFLAGS := --target=x86_64-linux-gnu -ffreestanding -fPIC -fno-stack-protector \
                      -mno-red-zone -D_GNU_SOURCE -Wall -Wextra \
                      -isystem $(MLIBC_SYSROOT)/usr/include
@@ -324,6 +339,26 @@ $(APPS_BUILD_DIR)/pixmantest/pixmantest: $(APPS_BUILD_DIR)/pixmantest/pixmantest
 	ld.lld -nostdlib -static -T apps/link/pixmantest.ld -e _start -o $@ \
 	    $(MLIBC_CRT_OBJS) $(APPS_BUILD_DIR)/pixmantest/pixmantest.c.o $(PIXMAN_LIBS) $(MLIBC_LIBS)
 	$(STRIP) --strip-all $@
+
+$(APPS_BUILD_DIR)/xorgprototest/xorgprototest.c.o: tests/xorgprototest/xorgprototest.c mlibc xorgproto
+	@mkdir -p $(@D)
+	$(CC) $(MLIBC_APP_CFLAGS) -isystem $(XORGPROTO_PREFIX)/include -c $< -o $@
+
+$(APPS_BUILD_DIR)/xorgprototest/xorgprototest: $(APPS_BUILD_DIR)/xorgprototest/xorgprototest.c.o apps/link/xorgprototest.ld
+	ld.lld -nostdlib -static -T apps/link/xorgprototest.ld -e _start -o $@ \
+	    $(MLIBC_CRT_OBJS) $(APPS_BUILD_DIR)/xorgprototest/xorgprototest.c.o $(MLIBC_LIBS)
+	$(STRIP) --strip-all $@
+
+# xtrans has no independent build of its own (Xtrans.c/Xtranssock.c/etc. are meant to be
+# #included directly into a consumer's own translation unit via transport.c, matching how
+# xserver itself will eventually consume it) -- this target is a compile-only check that it
+# still builds cleanly against xorgproto + mlibc, not a linkable/bootable artifact.
+$(APPS_BUILD_DIR)/xtranstest/transport.c.o: apps/xtrans/transport.c mlibc xorgproto
+	@mkdir -p $(@D)
+	$(CC) $(MLIBC_APP_CFLAGS) -isystem $(XORGPROTO_PREFIX)/include -I apps/xtrans \
+	    -DUNIXCONN -DHAS_STICKY_DIR_BIT -c $< -o $@
+
+xtranstest: $(APPS_BUILD_DIR)/xtranstest/transport.c.o
 
 CONFUSE_DIR := apps/confuse/src
 CONFUSE_BUILD_DIR := $(APPS_BUILD_DIR)/confuse
@@ -536,6 +571,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
                          $(APPS_BUILD_DIR)/socktest_client/socktest_client \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
                          $(APPS_BUILD_DIR)/pixmantest/pixmantest \
+                         $(APPS_BUILD_DIR)/xorgprototest/xorgprototest \
                          $(APPS_BUILD_DIR)/am/am \
                          $(APPS_BUILD_DIR)/top/top \
                          $(APPS_BUILD_DIR)/readlinetest/readlinetest \
@@ -571,6 +607,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
 	cp $(APPS_BUILD_DIR)/socktest_client/socktest_client $(ROOTFS_STAGE)/socktest_client
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
 	cp $(APPS_BUILD_DIR)/pixmantest/pixmantest $(ROOTFS_STAGE)/pixmantest
+	cp $(APPS_BUILD_DIR)/xorgprototest/xorgprototest $(ROOTFS_STAGE)/xorgprototest
 	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
 	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/sbin/reboot
 	cp $(APPS_BUILD_DIR)/powertools/halt $(ROOTFS_STAGE)/sbin/halt
