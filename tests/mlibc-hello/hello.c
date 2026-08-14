@@ -12,6 +12,7 @@
 #include <bits/winsize.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <poll.h>
 #define ROBU_TIOCGPGRP 0x540F
 #define ROBU_TIOCSPGRP 0x5410
 #define ROBU_TIOCGWINSZ 0x5413
@@ -212,6 +213,24 @@ static void termios_pgrp_test(void) {
     printf("pgrp test: tcgetpgrp=%d self=%d (expect equal)\n", fg_read, (int)me);
 }
 
+static void poll_test(void) {
+    struct pollfd pfd;
+    pfd.fd = 0;
+    pfd.events = POLLIN;
+    pfd.revents = -1;
+    int rc = poll(&pfd, 1, 200);
+    printf("poll test: poll(stdin, timeout=200ms) rc=%d revents=0x%x (expect rc=0, revents=0)\n",
+           rc, pfd.revents);
+
+    struct pollfd bad;
+    bad.fd = 9999;
+    bad.events = POLLIN;
+    bad.revents = 0;
+    rc = poll(&bad, 1, 0);
+    printf("poll test: poll(bad fd) rc=%d revents=0x%x (expect rc=1, revents has POLLNVAL=0x%x)\n",
+           rc, bad.revents, POLLNVAL);
+}
+
 static void root_account_test(void) {
     printf("root account test: getuid=%d geteuid=%d (expect both 0)\n",
            (int)getuid(), (int)geteuid());
@@ -289,6 +308,7 @@ int main(int argc, char **argv) {
     fork_and_pipe_test();
     spawn_pipeline_test();
     exec_test();
+    poll_test();
     sigaction_test();
     termios_pgrp_test();
     root_account_test();
