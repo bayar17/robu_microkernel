@@ -13,6 +13,7 @@
 #include "robu/arch.h"
 #include "robu/signal.h"
 #include "robu/framebuffer.h"
+#include "robu/shm.h"
 static tid_t console_writer_tid = 0;
 static tid_t console_driver_tid = 0;
 #define CONSOLE_VT_COUNT 6
@@ -849,6 +850,53 @@ void sys_ipc(void) {
                        | ((uint64_t)g_boot_fb.blue_pos   << 40)
                        | ((uint64_t)g_boot_fb.blue_size  << 48);
                 f->r13 = (uint64_t)g_boot_fb.type;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SHM_GET) {
+                int id = -1;
+                int rc = shm_get(cur->tid, (int)(int64_t)f->r9, f->r10, (uint32_t)f->r12, &id);
+                if (rc != IPC_ERR_NONE) {
+                    f->rax = (uint64_t)rc;
+                    return;
+                }
+                f->r8 = (uint64_t)(int64_t)id;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SHM_AT) {
+                if (cur->address_space == 0) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                if (f->r10 != 0) {
+                    f->rax = (uint64_t)IPC_ERR_INVALID;
+                    return;
+                }
+                uint64_t va = 0;
+                int rc = shm_at(cur->tid, cur->address_space, (int)(int64_t)f->r9,
+                                (uint32_t)f->r12, &va);
+                if (rc != IPC_ERR_NONE) {
+                    f->rax = (uint64_t)rc;
+                    return;
+                }
+                f->r8 = va;
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_SHM_DT) {
+                if (cur->address_space == 0) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                f->rax = (uint64_t)shm_dt(cur->address_space, f->r9);
+            } else if (category == SYS_INFO_CAT_SHM_CTL) {
+                uint64_t out_words[6] = {0, 0, 0, 0, 0, 0};
+                int rc = shm_ctl((int)(int64_t)f->r9, (int)(int64_t)f->r10, out_words);
+                if (rc != IPC_ERR_NONE) {
+                    f->rax = (uint64_t)rc;
+                    return;
+                }
+                f->r8 = out_words[0];
+                f->r9 = out_words[1];
+                f->r10 = out_words[2];
+                f->r12 = out_words[3];
+                f->r13 = out_words[4];
+                f->r14 = out_words[5];
                 f->rax = (uint64_t)IPC_ERR_NONE;
             } else {
                 f->rax = (uint64_t)IPC_ERR_NOT_FOUND;

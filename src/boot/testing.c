@@ -144,6 +144,12 @@ static void test_report_entry(void) {
                     m.word[2], m.word[1], m.word[3]);
             break;
         }
+        case TEST_REPORT_KIND_SHM_TEST: {
+            const char *who = m.word[4] == 1 ? "producer" : "consumer";
+            kprintf("[shm-test] %s: %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    who, m.word[2], m.word[1], m.word[3]);
+            break;
+        }
         default:
             kprintf("[test-report] unknown report kind=%lu from tid=%u\n", m.word[0], from);
             break;
@@ -342,6 +348,7 @@ void consoletest_init(void) {
     }
     toybox_spawn("consoletest", 1, (const char *const[]){ "consoletest" }, 9);
 }
+
 void mousetest_init(void) {
     if (!cmdline_get("mousetest")) {
         return;
@@ -354,6 +361,14 @@ void fbtest_init(void) {
         return;
     }
     toybox_spawn("fbtest", 1, (const char *const[]){ "fbtest" }, 9);
+}
+
+void shmtest_init(void) {
+    if (!cmdline_get("shmtest")) {
+        return;
+    }
+    toybox_spawn("shmtest_producer", 1, (const char *const[]){ "shmtest_producer" }, 9);
+    toybox_spawn("shmtest_consumer", 1, (const char *const[]){ "shmtest_consumer" }, 9);
 }
 
 void readlinetest_init(void) {

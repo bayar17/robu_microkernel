@@ -9,6 +9,7 @@
 #include "robu/trace.h"
 #include "robu/pipe.h"
 #include "robu/signal.h"
+#include "robu/shm.h"
 #include "percpu.h"
 extern volatile uint32_t cpu_online[MAX_CPUS];
 sched_stats_t sched_stats;
@@ -200,6 +201,7 @@ static void terminate_tcb(tcb_t *t, thread_state_t final_state) {
         if (t == current_thread) {
             arch_vm_activate(0);
         }
+        shm_detach_all_for_process(t->address_space);
         vm_address_space_destroy(t->address_space);
         t->address_space = 0;
     }

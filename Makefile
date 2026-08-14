@@ -203,6 +203,22 @@ $(APPS_BUILD_DIR)/fbtest/fbtest: $(APPS_BUILD_DIR)/fbtest/fbtest.c.o apps/link/f
 	$(LD) $(APP_LDFLAGS) -T apps/link/fbtest.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/fbtest/fbtest.c.o
 
+$(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer.c.o: tests/shmtest/shmtest_producer.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer: $(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer.c.o apps/link/shmtest_producer.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/shmtest_producer.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer.c.o
+
+$(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer.c.o: tests/shmtest/shmtest_consumer.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer: $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer.c.o apps/link/shmtest_consumer.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/shmtest_consumer.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer.c.o
+
 $(APPS_BUILD_DIR)/vfs_mount/mount_devfs.c.o: apps/vfs_mount/mount_devfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -465,6 +481,8 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
                          $(APPS_BUILD_DIR)/consoletest/consoletest \
                          $(APPS_BUILD_DIR)/mousetest/mousetest \
                          $(APPS_BUILD_DIR)/fbtest/fbtest \
+                         $(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer \
+                         $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
                          $(APPS_BUILD_DIR)/am/am \
                          $(APPS_BUILD_DIR)/top/top \
@@ -495,6 +513,8 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
 	cp $(APPS_BUILD_DIR)/consoletest/consoletest $(ROOTFS_STAGE)/consoletest
 	cp $(APPS_BUILD_DIR)/mousetest/mousetest $(ROOTFS_STAGE)/mousetest
 	cp $(APPS_BUILD_DIR)/fbtest/fbtest $(ROOTFS_STAGE)/fbtest
+	cp $(APPS_BUILD_DIR)/shmtest_producer/shmtest_producer $(ROOTFS_STAGE)/shmtest_producer
+	cp $(APPS_BUILD_DIR)/shmtest_consumer/shmtest_consumer $(ROOTFS_STAGE)/shmtest_consumer
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
 	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
 	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/sbin/reboot

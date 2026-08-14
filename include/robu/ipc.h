@@ -44,6 +44,9 @@
 #define IPC_ERR_NO_CAP    -4
 #define IPC_ERR_WOULDBLOCK -5
 #define IPC_ERR_NO_MEM     -6
+#define IPC_ERR_EXISTS     -7
+#define IPC_ERR_NO_SPACE   -8
+#define IPC_ERR_INVALID    -9
 void sys_ipc(void);
 void ipc_grant_console_writer(tid_t tid);
 void ipc_grant_console_driver(tid_t tid);

@@ -32,4 +32,8 @@ int arch_console_mouse_read(uint64_t *out, int max);
 #define SYS_INFO_CAT_MOUSE_FEED 22
 #define SYS_INFO_CAT_MOUSE_READ 23
 #define SYS_INFO_CAT_FB_MAP 24
+#define SYS_INFO_CAT_SHM_GET 25
+#define SYS_INFO_CAT_SHM_AT  26
+#define SYS_INFO_CAT_SHM_DT  27
+#define SYS_INFO_CAT_SHM_CTL 28
 #endif
