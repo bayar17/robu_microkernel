@@ -10,7 +10,7 @@
 #include "robu/pipe.h"
 #include "robu/signal.h"
 #include "percpu.h"
-extern volatile uint32_t ap_joined_flag;
+extern volatile uint32_t cpu_online[MAX_CPUS];
 sched_stats_t sched_stats;
 static spinlock_t kernel_lock = SPINLOCK_INIT;
 void sched_lock_acquire(void) {
@@ -108,7 +108,7 @@ void sched_wake(tcb_t *t) {
         if (c == this_cpu()->cpu_id) {
             continue;
         }
-        if (c != 0 && !ap_joined_flag) {
+        if (!cpu_online[c]) {
             continue;
         }
         if (armed_ticks[c] <= SCHED_TIMESLICE_TICKS) {
