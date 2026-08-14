@@ -1,6 +1,7 @@
 #include "robu/types.h"
 #include "robu/arch.h"
 #include "robu/kprintf.h"
+#include "robu/framebuffer.h"
 
 #define PVH_MAGIC 0x336ec578u
 #define MB2_MAGIC 0x36d76289u
@@ -72,8 +73,24 @@ struct mb2_tag_rsdp {
     uint8_t rsdp_data[1];
 };
 
+struct mb2_tag_framebuffer {
+    uint32_t type;
+    uint32_t size;
+    uint64_t addr;
+    uint32_t pitch;
+    uint32_t width;
+    uint32_t height;
+    uint8_t bpp;
+    uint8_t fb_type;
+    uint16_t reserved;
+    uint8_t red_pos, red_size;
+    uint8_t green_pos, green_size;
+    uint8_t blue_pos, blue_size;
+} __attribute__((packed));
+
 #define MB2_TAG_RSDP_OLD 14
 #define MB2_TAG_RSDP_NEW 15
+#define MB2_TAG_FRAMEBUFFER 8
 
 #define HVM_MEMMAP_TYPE_RAM 1
 extern uint64_t pvh_start_info_ptr;
@@ -170,6 +187,37 @@ int arch_boot_rsdp(paddr_t *out_rsdp) {
     if (info && info->rsdp_paddr) {
         *out_rsdp = (paddr_t)info->rsdp_paddr;
         return 0;
+    }
+    return -1;
+}
+
+int arch_boot_framebuffer(fb_info_t *out) {
+    if (multiboot2_info_ptr) {
+        uint32_t total_size = *(uint32_t *)multiboot2_info_ptr;
+        uint8_t *ptr = (uint8_t *)(multiboot2_info_ptr + 8);
+        while (ptr < (uint8_t *)multiboot2_info_ptr + total_size) {
+            struct mb2_tag *tag = (struct mb2_tag *)ptr;
+            if (tag->type == 0) break;
+            if (tag->type == MB2_TAG_FRAMEBUFFER) {
+                struct mb2_tag_framebuffer *fb = (struct mb2_tag_framebuffer *)tag;
+                out->phys_addr = fb->addr;
+                out->pitch = fb->pitch;
+                out->width = fb->width;
+                out->height = fb->height;
+                out->bpp = fb->bpp;
+                out->type = fb->fb_type;
+                if (fb->fb_type == 1) {
+                    out->red_pos = fb->red_pos;
+                    out->red_size = fb->red_size;
+                    out->green_pos = fb->green_pos;
+                    out->green_size = fb->green_size;
+                    out->blue_pos = fb->blue_pos;
+                    out->blue_size = fb->blue_size;
+                }
+                return 0;
+            }
+            ptr += (tag->size + 7) & ~7;
+        }
     }
     return -1;
 }

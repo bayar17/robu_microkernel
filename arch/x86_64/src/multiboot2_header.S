@@ -10,6 +10,15 @@ mb2_header_start:
     .long mb2_header_end - mb2_header_start
     .long -(MULTIBOOT2_HEADER_MAGIC + MULTIBOOT2_ARCH_I386 + (mb2_header_end - mb2_header_start))
 
+    .align 8
+    .short 5
+    .short 1
+    .long 20
+    .long 1024
+    .long 768
+    .long 32
+
+    .align 8
     .short 0
     .short 0
     .long 8

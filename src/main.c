@@ -12,6 +12,7 @@
 #include "robu/dma.h"
 #include "robu/kheap.h"
 #include "robu/virtio_blk.h"
+#include "robu/framebuffer.h"
 #include "lapic.h"
 #include "smp.h"
 #include "percpu.h"
@@ -117,6 +118,26 @@ void kmain(void) {
     paddr_t untyped_base = dma_region_base + DMA_REGION_SIZE;
     paddr_t acpi_heap_base = untyped_base + UNTYPED_REGION_SIZE;
     pmm_init(mem_base, pmm_len, mod_base, mod_len);
+    extern paddr_t boot_pml4;
+    fb_info_t fb;
+    int have_fb = (arch_boot_framebuffer(&fb) == 0 && fb.type == 1);
+    if (!have_fb) {
+        have_fb = (vbe_set_mode(1024, 768, 32, &fb) == 0);
+    }
+    if (have_fb) {
+        uint64_t fb_size = (uint64_t)fb.pitch * fb.height;
+        uint64_t page_count = (fb_size + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K;
+        for (uint64_t i = 0; i < page_count; i++) {
+            arch_vm_map_page((paddr_t)&boot_pml4, FRAMEBUFFER_VA + i * PAGE_SIZE_4K,
+                              (paddr_t)(fb.phys_addr + i * PAGE_SIZE_4K),
+                              VM_PROT_READ | VM_PROT_WRITE);
+        }
+        fbconsole_init(&fb);
+        kprintf("[boot] framebuffer: phys=0x%lx virt=0x%lx %ux%u pitch=%u bpp=%u type=%u\n",
+                fb.phys_addr, (uint64_t)FRAMEBUFFER_VA, fb.width, fb.height, fb.pitch, fb.bpp, fb.type);
+    } else {
+        kprintf("[boot] framebuffer: not available\n");
+    }
     dma_region_init(dma_region_base, DMA_REGION_SIZE);
     untyped_init(untyped_base, UNTYPED_REGION_SIZE);
     kheap_init(acpi_heap_base, ACPI_HEAP_REGION_SIZE);

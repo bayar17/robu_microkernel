@@ -518,10 +518,12 @@ $(BUILD_DIR)/robu_kernel.iso: $(BUILD_DIR)/$(TARGET) $(BUILD_DIR)/rootfs.tar iso
 	sed 's|@QEMU_APPEND@|$(QEMU_APPEND)|' iso/boot/grub/grub.cfg.in \
 	    > $(BUILD_DIR)/iso_root/boot/grub/grub.cfg
 	@if command -v grub-mkrescue >/dev/null 2>&1; then \
-	    grub-mkrescue -o $(BUILD_DIR)/robu_kernel.iso $(BUILD_DIR)/iso_root; \
+	    grub-mkrescue -o $(BUILD_DIR)/robu_kernel.iso $(BUILD_DIR)/iso_root \
+	        --modules="normal iso9660 multiboot2 biosdisk part_msdos vbe video video_bochs video_cirrus all_video vga vga_text gfxterm"; \
 	else \
 	    $(GRUB_DOCKER) run --rm --platform=linux/amd64 -v $(abspath $(BUILD_DIR)):/build $(GRUB_DOCKER_IMAGE) \
-	        bash -c "apt-get update -qq && apt-get install -y -qq grub-pc-bin grub-common xorriso mtools >/dev/null 2>&1 && grub-mkrescue -o /build/robu_kernel.iso /build/iso_root"; \
+	        bash -c "apt-get update -qq && apt-get install -y -qq grub-pc-bin grub-common xorriso mtools >/dev/null 2>&1 && grub-mkrescue -o /build/robu_kernel.iso /build/iso_root \
+	            --modules='normal iso9660 multiboot2 biosdisk part_msdos vbe video video_bochs video_cirrus all_video vga vga_text gfxterm'"; \
 	fi
 
 iso:

@@ -1,9 +1,12 @@
 #include "robu/types.h"
 #include "robu/kprintf.h"
 #include "robu/spinlock.h"
+#include "robu/framebuffer.h"
 #include "portio.h"
 
 #define COM1 0x3F8
+
+static int serial_present;
 
 static void serial_init(void) {
     outb(COM1 + 1, 0x00);
@@ -148,11 +151,6 @@ static void vga_clear_vt(int vt) {
     g->view_offset = 0;
 }
 
-static void vga_clear(void) {
-    vga_clear_vt(active_vt);
-    render_screen();
-}
-
 static void apply_ansi_color(int vt, int code) {
     vga_vt_state_t *g = &vga_vts[vt];
     switch (code) {
@@ -247,6 +245,7 @@ void arch_console_switch_vt(int vt) {
     }
     active_vt = vt;
     render_screen();
+    fbconsole_clear();
 }
 
 int arch_console_get_active_vt(void) {
@@ -271,21 +270,25 @@ void arch_console_init(void) {
 }
 
 void arch_console_putc(char c) {
+    vga_putc(active_vt, c);
+    fbconsole_putc(c);
     if (c == '\n') {
         serial_putc('\r');
     }
     serial_putc(c);
-    vga_putc(active_vt, c);
 }
 
 static spinlock_t console_ring_lock = SPINLOCK_INIT;
 
 void arch_console_vt_putc(int vt, char c) {
+    vga_putc(vt, c);
+    if (vt == active_vt) {
+        fbconsole_putc(c);
+    }
     if (c == '\n') {
         serial_putc('\r');
     }
     serial_putc(c);
-    vga_putc(vt, c);
 }
 
 static void ring_push_locked(vt_state_t *v, char c) {
