@@ -12,6 +12,7 @@
 #include "robu/virtio_blk.h"
 #include "robu/arch.h"
 #include "robu/signal.h"
+#include "robu/framebuffer.h"
 static tid_t console_writer_tid = 0;
 static tid_t console_driver_tid = 0;
 #define CONSOLE_VT_COUNT 6
@@ -820,6 +821,34 @@ void sys_ipc(void) {
                 f->r10 = events[1];
                 f->r12 = events[2];
                 f->r13 = events[3];
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_FB_MAP) {
+                if (!g_boot_fb_present) {
+                    f->rax = (uint64_t)IPC_ERR_NOT_FOUND;
+                    return;
+                }
+                if (cur->address_space == 0) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                uint64_t fb_size = (uint64_t)g_boot_fb.pitch * g_boot_fb.height;
+                uint64_t page_count = (fb_size + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K;
+                for (uint64_t i = 0; i < page_count; i++) {
+                    arch_vm_map_page(cur->address_space, FRAMEBUFFER_USER_VA + i * PAGE_SIZE_4K,
+                                      g_boot_fb.phys_addr + i * PAGE_SIZE_4K,
+                                      VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER);
+                }
+                f->r8 = (uint64_t)g_boot_fb.width;
+                f->r9 = (uint64_t)g_boot_fb.height;
+                f->r10 = (uint64_t)g_boot_fb.pitch;
+                f->r12 = (uint64_t)g_boot_fb.bpp
+                       | ((uint64_t)g_boot_fb.red_pos    << 8)
+                       | ((uint64_t)g_boot_fb.red_size   << 16)
+                       | ((uint64_t)g_boot_fb.green_pos  << 24)
+                       | ((uint64_t)g_boot_fb.green_size << 32)
+                       | ((uint64_t)g_boot_fb.blue_pos   << 40)
+                       | ((uint64_t)g_boot_fb.blue_size  << 48);
+                f->r13 = (uint64_t)g_boot_fb.type;
                 f->rax = (uint64_t)IPC_ERR_NONE;
             } else {
                 f->rax = (uint64_t)IPC_ERR_NOT_FOUND;

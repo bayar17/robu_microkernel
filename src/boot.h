@@ -56,6 +56,7 @@ void ramfstest_init(void);
 void spawntest_init(void);
 void consoletest_init(void);
 void mousetest_init(void);
+void fbtest_init(void);
 void sigtest_init(void);
 void readlinetest_init(void);
 void toybox_sh_c_init(void);

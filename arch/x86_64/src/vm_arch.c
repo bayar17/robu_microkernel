@@ -7,6 +7,7 @@
 #include "lapic.h"
 #include "robu/kinfo.h"
 #include "robu/untyped.h"
+#include "robu/framebuffer.h"
 extern paddr_t boot_pml4;
 extern paddr_t boot_pdpt;
 static spinlock_t vm_lock = SPINLOCK_INIT;
@@ -32,6 +33,9 @@ paddr_t arch_vm_create_address_space(void) {
     if (kernel_pdpt[PDPT_INDEX(KINFO_VA)]) {
         pdpt_table[PDPT_INDEX(KINFO_VA)] = kernel_pdpt[PDPT_INDEX(KINFO_VA)];
     }
+    if (kernel_pdpt[PDPT_INDEX(FRAMEBUFFER_VA)]) {
+        pdpt_table[PDPT_INDEX(FRAMEBUFFER_VA)] = kernel_pdpt[PDPT_INDEX(FRAMEBUFFER_VA)];
+    }
     pte_t *pml4_table = (pte_t *)pml4;
     pml4_table[0] = pdpt | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
     spin_unlock(&vm_lock);
@@ -41,6 +45,8 @@ void arch_vm_destroy_address_space(paddr_t aspace) {
     paddr_t untyped_base;
     uint64_t untyped_size;
     untyped_range(&untyped_base, &untyped_size);
+    paddr_t fb_base = g_boot_fb_present ? (paddr_t)g_boot_fb.phys_addr : 0;
+    uint64_t fb_len = g_boot_fb_present ? (uint64_t)g_boot_fb.pitch * g_boot_fb.height : 0;
     spin_lock(&vm_lock);
     pte_t *pml4 = (pte_t *)aspace;
     pte_t *kernel_pdpt = (pte_t *)&boot_pdpt;
@@ -60,7 +66,8 @@ void arch_vm_destroy_address_space(paddr_t aspace) {
                 }
                 if (pd[j] & X86_PTE_PS) {
                     paddr_t leaf = pd[j] & PAGE_MASK_2M & ~X86_PTE_NX;
-                    if (leaf < untyped_base || leaf >= untyped_base + untyped_size) {
+                    if ((leaf < untyped_base || leaf >= untyped_base + untyped_size) &&
+                        (!fb_len || leaf < fb_base || leaf >= fb_base + fb_len)) {
                         pmm_free(leaf);
                     }
                     continue;
@@ -71,7 +78,8 @@ void arch_vm_destroy_address_space(paddr_t aspace) {
                         continue;
                     }
                     paddr_t leaf = pt[k] & PAGE_MASK_4K & ~X86_PTE_NX;
-                    if (leaf < untyped_base || leaf >= untyped_base + untyped_size) {
+                    if ((leaf < untyped_base || leaf >= untyped_base + untyped_size) &&
+                        (!fb_len || leaf < fb_base || leaf >= fb_base + fb_len)) {
                         pmm_free(leaf);
                     }
                 }
@@ -89,6 +97,8 @@ paddr_t arch_vm_clone_address_space(paddr_t src) {
     if (!dst) {
         return 0;
     }
+    paddr_t fb_base = g_boot_fb_present ? (paddr_t)g_boot_fb.phys_addr : 0;
+    uint64_t fb_len = g_boot_fb_present ? (uint64_t)g_boot_fb.pitch * g_boot_fb.height : 0;
     pte_t *src_pml4 = (pte_t *)src;
     pte_t *kernel_pdpt = (pte_t *)&boot_pdpt;
     if (!(src_pml4[0] & X86_PTE_P)) {
@@ -116,6 +126,9 @@ paddr_t arch_vm_clone_address_space(paddr_t src) {
                     continue;
                 }
                 paddr_t src_frame = src_pt[k] & PAGE_MASK_4K & ~X86_PTE_NX;
+                if (fb_len && src_frame >= fb_base && src_frame < fb_base + fb_len) {
+                    continue;
+                }
                 paddr_t dst_frame = pmm_alloc(PMM_COLOR_ANY);
                 if (!dst_frame) {
                     return 0;

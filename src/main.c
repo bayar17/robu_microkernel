@@ -201,6 +201,7 @@ void kmain(void) {
     sigtest_init();
     consoletest_init();
     mousetest_init();
+    fbtest_init();
     readlinetest_init();
     toybox_sh_c_init();
 

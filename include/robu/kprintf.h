@@ -31,4 +31,5 @@ int arch_console_mouse_read(uint64_t *out, int max);
 #define SYS_INFO_CAT_CONSOLE_SCROLL 21
 #define SYS_INFO_CAT_MOUSE_FEED 22
 #define SYS_INFO_CAT_MOUSE_READ 23
+#define SYS_INFO_CAT_FB_MAP 24
 #endif

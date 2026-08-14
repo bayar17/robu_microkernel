@@ -136,6 +136,14 @@ static void test_report_entry(void) {
                     m.word[2], m.word[1], m.word[3]);
             break;
         }
+        case TEST_REPORT_KIND_FB_TEST: {
+            uint32_t width = (uint32_t)(m.word[4] & 0xFFFF);
+            uint32_t height = (uint32_t)((m.word[4] >> 16) & 0xFFFF);
+            kprintf("[fb-test] mapped %ux%u framebuffer\n", width, height);
+            kprintf("[fb-test] %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    m.word[2], m.word[1], m.word[3]);
+            break;
+        }
         default:
             kprintf("[test-report] unknown report kind=%lu from tid=%u\n", m.word[0], from);
             break;
@@ -341,6 +349,12 @@ void mousetest_init(void) {
     toybox_spawn("mousetest", 1, (const char *const[]){ "mousetest" }, 9);
 }
 
+void fbtest_init(void) {
+    if (!cmdline_get("fbtest")) {
+        return;
+    }
+    toybox_spawn("fbtest", 1, (const char *const[]){ "fbtest" }, 9);
+}
 
 void readlinetest_init(void) {
     if (!cmdline_get("readlinetest")) {
