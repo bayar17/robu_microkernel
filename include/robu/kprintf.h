@@ -19,6 +19,8 @@ void arch_console_switch_vt(int vt);
 int arch_console_get_active_vt(void);
 void arch_console_scroll(int delta);
 int64_t arch_console_port_io(uint16_t port, int width, int is_write, uint64_t value);
+void arch_console_mouse_feed(uint64_t packed_event);
+int arch_console_mouse_read(uint64_t *out, int max);
 
 #define SYS_INFO_CAT_CONSOLE_MODE 10
 #define SYS_INFO_CAT_ACTIVE_VT 16
@@ -27,4 +29,6 @@ int64_t arch_console_port_io(uint16_t port, int width, int is_write, uint64_t va
 #define SYS_INFO_CAT_CONSOLE_SIGNAL_FG 19
 #define SYS_INFO_CAT_SET_ACTIVE_VT 20
 #define SYS_INFO_CAT_CONSOLE_SCROLL 21
+#define SYS_INFO_CAT_MOUSE_FEED 22
+#define SYS_INFO_CAT_MOUSE_READ 23
 #endif

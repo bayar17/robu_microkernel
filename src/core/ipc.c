@@ -801,6 +801,26 @@ void sys_ipc(void) {
                 }
                 arch_console_scroll((int)(int64_t)f->r9);
                 f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_MOUSE_FEED) {
+                if (cur->tid != console_driver_tid) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                arch_console_mouse_feed(f->r9);
+                f->rax = (uint64_t)IPC_ERR_NONE;
+            } else if (category == SYS_INFO_CAT_MOUSE_READ) {
+                if (cur->tid != console_writer_tid) {
+                    f->rax = (uint64_t)IPC_ERR_NO_CAP;
+                    return;
+                }
+                uint64_t events[4] = {0, 0, 0, 0};
+                int n = arch_console_mouse_read(events, 4);
+                f->r8 = (uint64_t)n;
+                f->r9 = events[0];
+                f->r10 = events[1];
+                f->r12 = events[2];
+                f->r13 = events[3];
+                f->rax = (uint64_t)IPC_ERR_NONE;
             } else {
                 f->rax = (uint64_t)IPC_ERR_NOT_FOUND;
             }

@@ -187,6 +187,14 @@ $(APPS_BUILD_DIR)/consoletest/consoletest: $(APPS_BUILD_DIR)/consoletest/console
 	$(LD) $(APP_LDFLAGS) -T apps/link/consoletest.ld -e _start -o $@ \
 	    $(APPS_BUILD_DIR)/consoletest/consoletest.c.o
 
+$(APPS_BUILD_DIR)/mousetest/mousetest.c.o: tests/mousetest/mousetest.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(APPS_BUILD_DIR)/mousetest/mousetest: $(APPS_BUILD_DIR)/mousetest/mousetest.c.o apps/link/mousetest.ld
+	$(LD) $(APP_LDFLAGS) -T apps/link/mousetest.ld -e _start -o $@ \
+	    $(APPS_BUILD_DIR)/mousetest/mousetest.c.o
+
 $(APPS_BUILD_DIR)/vfs_mount/mount_devfs.c.o: apps/vfs_mount/mount_devfs.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -447,6 +455,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
                          $(APPS_BUILD_DIR)/powertools/shutdown \
                          $(APPS_BUILD_DIR)/sigtest/sigtest \
                          $(APPS_BUILD_DIR)/consoletest/consoletest \
+                         $(APPS_BUILD_DIR)/mousetest/mousetest \
                          $(APPS_BUILD_DIR)/mlibc-hello/hello \
                          $(APPS_BUILD_DIR)/am/am \
                          $(APPS_BUILD_DIR)/top/top \
@@ -475,6 +484,7 @@ $(BUILD_DIR)/rootfs.tar: $(APPS_BUILD_DIR)/devfs/devfs $(APPS_BUILD_DIR)/console
 	cp $(APPS_BUILD_DIR)/pager/pager $(ROOTFS_STAGE)/pager
 	cp $(APPS_BUILD_DIR)/sigtest/sigtest $(ROOTFS_STAGE)/sigtest
 	cp $(APPS_BUILD_DIR)/consoletest/consoletest $(ROOTFS_STAGE)/consoletest
+	cp $(APPS_BUILD_DIR)/mousetest/mousetest $(ROOTFS_STAGE)/mousetest
 	cp $(APPS_BUILD_DIR)/mlibc-hello/hello $(ROOTFS_STAGE)/mlibc-hello
 	cp $(APPS_BUILD_DIR)/readlinetest/readlinetest $(ROOTFS_STAGE)/readlinetest
 	cp $(APPS_BUILD_DIR)/powertools/reboot $(ROOTFS_STAGE)/sbin/reboot

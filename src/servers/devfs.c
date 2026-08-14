@@ -12,10 +12,12 @@ typedef enum {
     DEV_RSTTY4 = 7,
     DEV_RSTTY5 = 8,
     DEV_RSTTY6 = 9,
+    DEV_MOUSE = 10,
 } dev_id_t;
 #define VT_COUNT 6
 #define SYS_INFO_CAT_ACTIVE_VT 16
 #define SYS_INFO_CAT_CONSOLE_MODE 10
+#define SYS_INFO_CAT_MOUSE_READ 23
 #define VFS_ERR_INTERRUPTED (-9)
 static int name_eq(const char *a, const char *b) {
     for (int i = 0; i < VFS_PATH_MAX; i++) {
@@ -39,10 +41,11 @@ static int resolve_name(const char *name, dev_id_t *out) {
     if (name_eq(name, "rstty4"))  { *out = DEV_RSTTY4;  return 0; }
     if (name_eq(name, "rstty5"))  { *out = DEV_RSTTY5;  return 0; }
     if (name_eq(name, "rstty6"))  { *out = DEV_RSTTY6;  return 0; }
+    if (name_eq(name, "mouse"))   { *out = DEV_MOUSE;   return 0; }
     return -1;
 }
 static int valid_handle(uint64_t h) {
-    return h <= DEV_RSTTY6;
+    return h <= DEV_MOUSE;
 }
 static int dev_to_vt(dev_id_t id) {
     if (id == DEV_CONSOLE) {
@@ -142,6 +145,41 @@ static void console_drain(int vt) {
             continue;
         }
         console_local_push(vt, byte);
+    }
+}
+static int devfs_kernel_mouse_read(uint64_t *out, int max) {
+    msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = SYS_INFO_CAT_MOUSE_READ;
+    robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+    int n = (int)m.word[0];
+    if (n > 4) {
+        n = 4;
+    }
+    uint64_t events[4] = { m.word[1], m.word[2], m.word[3], m.word[4] };
+    if (n > max) {
+        n = max;
+    }
+    for (int i = 0; i < n; i++) {
+        out[i] = events[i];
+    }
+    return n;
+}
+#define MOUSE_LOCAL_BUF_EVENTS 16
+static uint64_t mouse_local_buf[MOUSE_LOCAL_BUF_EVENTS];
+static uint32_t mouse_local_head, mouse_local_tail;
+static void mouse_drain(void) {
+    if (mouse_local_head != mouse_local_tail) {
+        return;
+    }
+    uint64_t events[4];
+    int got = devfs_kernel_mouse_read(events, 4);
+    for (int i = 0; i < got; i++) {
+        uint32_t next = (mouse_local_head + 1) % MOUSE_LOCAL_BUF_EVENTS;
+        if (next == mouse_local_tail) {
+            break;
+        }
+        mouse_local_buf[mouse_local_head] = events[i];
+        mouse_local_head = next;
     }
 }
 static int rdrand_available;
@@ -264,6 +302,28 @@ static void handle_read(msg_regs_t *m, tid_t from) {
         reply->status = n;
         break;
     }
+    case DEV_MOUSE: {
+        mouse_drain();
+        if (mouse_local_head == mouse_local_tail) {
+            reply->status = VFS_ERR_WOULDBLOCK;
+            break;
+        }
+        int max_events = (int)(len / 8);
+        if (max_events < 1) {
+            max_events = 1;
+        }
+        int n = 0;
+        while (n < max_events && mouse_local_head != mouse_local_tail) {
+            uint64_t ev = mouse_local_buf[mouse_local_tail];
+            mouse_local_tail = (mouse_local_tail + 1) % MOUSE_LOCAL_BUF_EVENTS;
+            for (int b = 0; b < 8; b++) {
+                reply->data[n * 8 + b] = (uint8_t)(ev >> (b * 8));
+            }
+            n++;
+        }
+        reply->status = n * 8;
+        break;
+    }
     default:
         reply->status = VFS_ERR_NOT_SUPPORTED;
         break;
@@ -299,6 +359,10 @@ static void handle_peek(msg_regs_t *m, tid_t from) {
         reply->status = (console_local_head[vt] != console_local_tail[vt] || console_eof_pending[vt]) ? 1 : 0;
         break;
     }
+    case DEV_MOUSE:
+        mouse_drain();
+        reply->status = (mouse_local_head != mouse_local_tail) ? 1 : 0;
+        break;
     default:
         reply->status = 0;
         break;
@@ -333,6 +397,9 @@ static void handle_write(msg_regs_t *m) {
         devfs_kernel_console_write(dev_to_vt((dev_id_t)handle), data, len);
         reply->status = (int64_t)len;
         break;
+    case DEV_MOUSE:
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        break;
     }
 }
 static void handle_close(msg_regs_t *m) {
@@ -343,7 +410,8 @@ static void handle_close(msg_regs_t *m) {
 }
 static void handle_readdir(msg_regs_t *m) {
     static const char *const names[] = { "console", "null", "zero", "random",
-                                          "rstty1", "rstty2", "rstty3", "rstty4", "rstty5", "rstty6" };
+                                          "rstty1", "rstty2", "rstty3", "rstty4", "rstty5", "rstty6",
+                                          "mouse" };
     const vfs_readdir_req_t *req = (const vfs_readdir_req_t *)m;
     uint64_t want = req->index;
     vfs_readdir_reply_t *reply = (vfs_readdir_reply_t *)m;

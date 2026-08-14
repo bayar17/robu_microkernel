@@ -127,6 +127,15 @@ static void test_report_entry(void) {
             kprintf("[console-test] %lu/%lu checks passed (fail bitmask=0x%lx)\n",
                     m.word[2], m.word[1], m.word[3]);
             break;
+        case TEST_REPORT_KIND_MOUSE_TEST: {
+            int16_t dx = (int16_t)(m.word[4] & 0xFFFF);
+            int16_t dy = (int16_t)((m.word[4] >> 16) & 0xFFFF);
+            uint8_t buttons = (uint8_t)((m.word[4] >> 32) & 0xFF);
+            kprintf("[mouse-test] last event dx=%d dy=%d buttons=0x%x\n", dx, dy, buttons);
+            kprintf("[mouse-test] %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    m.word[2], m.word[1], m.word[3]);
+            break;
+        }
         default:
             kprintf("[test-report] unknown report kind=%lu from tid=%u\n", m.word[0], from);
             break;
@@ -325,6 +334,13 @@ void consoletest_init(void) {
     }
     toybox_spawn("consoletest", 1, (const char *const[]){ "consoletest" }, 9);
 }
+void mousetest_init(void) {
+    if (!cmdline_get("mousetest")) {
+        return;
+    }
+    toybox_spawn("mousetest", 1, (const char *const[]){ "mousetest" }, 9);
+}
+
 
 void readlinetest_init(void) {
     if (!cmdline_get("readlinetest")) {

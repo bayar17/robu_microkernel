@@ -387,3 +387,29 @@ int arch_console_read_line_bytes(int vt, uint8_t *out, int max) {
     spin_unlock(&console_ring_lock);
     return n;
 }
+
+#define MOUSE_RING_SIZE 64
+static uint64_t mouse_ring[MOUSE_RING_SIZE];
+static uint32_t mouse_ring_head, mouse_ring_tail;
+static spinlock_t mouse_ring_lock = SPINLOCK_INIT;
+
+void arch_console_mouse_feed(uint64_t packed_event) {
+    spin_lock(&mouse_ring_lock);
+    uint32_t next = (mouse_ring_head + 1) % MOUSE_RING_SIZE;
+    if (next != mouse_ring_tail) {
+        mouse_ring[mouse_ring_head] = packed_event;
+        mouse_ring_head = next;
+    }
+    spin_unlock(&mouse_ring_lock);
+}
+
+int arch_console_mouse_read(uint64_t *out, int max) {
+    spin_lock(&mouse_ring_lock);
+    int n = 0;
+    while (n < max && mouse_ring_tail != mouse_ring_head) {
+        out[n++] = mouse_ring[mouse_ring_tail];
+        mouse_ring_tail = (mouse_ring_tail + 1) % MOUSE_RING_SIZE;
+    }
+    spin_unlock(&mouse_ring_lock);
+    return n;
+}
