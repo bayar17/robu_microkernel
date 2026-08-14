@@ -5,7 +5,7 @@
 #define GDT_SEL_UCODE  0x18
 #define GDT_SEL_UDATA  0x20
 #define GDT_SEL_TSS    0x28
-#define GDT_SEL_TSS_AP 0x38
+#define GDT_SEL_TSS_CPU(cpu_id) ((uint16_t)((5 + 2 * (cpu_id)) * 8))
 #define GDT_SEL_UCODE_RPL3 (GDT_SEL_UCODE | 3)
 #define GDT_SEL_UDATA_RPL3 (GDT_SEL_UDATA | 3)
 #endif

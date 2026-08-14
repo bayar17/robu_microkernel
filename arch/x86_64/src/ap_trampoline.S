@@ -68,8 +68,9 @@ ap64_start:
     mov %ax, %es
     mov %ax, %ss
 
-    .extern ap_kstack_top
-    movq $ap_kstack_top, %rsp
+    .extern ap_next_kstack_top
+    movabsq $ap_next_kstack_top, %rax
+    movq (%rax), %rsp
     xorq %rbp, %rbp
 
     .extern ap_entry

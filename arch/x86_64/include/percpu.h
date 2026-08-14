@@ -1,6 +1,6 @@
 #ifndef ARCH_X86_64_PERCPU_H
 #define ARCH_X86_64_PERCPU_H
-#define MAX_CPUS 2
+#define MAX_CPUS 16
 #define PERCPU_OFF_KSTACK_TOP    8
 #define PERCPU_OFF_TRAP_SCRATCH  16
 #ifndef __ASSEMBLER__

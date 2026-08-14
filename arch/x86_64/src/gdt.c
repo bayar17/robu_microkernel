@@ -1,6 +1,7 @@
 #include "robu/types.h"
 #include "robu/arch.h"
 #include "gdt.h"
+#include "percpu.h"
 typedef struct __attribute__((packed)) {
     uint32_t reserved0;
     uint64_t rsp0;
@@ -17,10 +18,8 @@ struct __attribute__((packed)) gdtr {
     uint64_t base;
 };
 extern uint8_t kstack_top[];
-extern uint8_t ap_kstack_top[];
-static uint64_t gdt[9] __attribute__((aligned(16)));
-static tss64_t tss __attribute__((aligned(16)));
-static tss64_t ap_tss __attribute__((aligned(16)));
+static uint64_t gdt[5 + 2 * MAX_CPUS] __attribute__((aligned(16)));
+static tss64_t cpu_tss[MAX_CPUS] __attribute__((aligned(16)));
 struct gdtr kernel_gdt_ptr;
 static uint64_t flat_entry(uint8_t access, uint8_t flags_nib) {
     uint64_t d = 0;
@@ -45,12 +44,12 @@ void arch_gdt_init(void) {
     gdt[2] = flat_entry(0x92, 0x0);
     gdt[3] = flat_entry(0xFA, 0x2);
     gdt[4] = flat_entry(0xF2, 0x0);
-    for (int i = 0; i < (int)(sizeof(tss) / sizeof(uint64_t)); i++) {
-        ((uint64_t *)&tss)[i] = 0;
+    for (int i = 0; i < (int)(sizeof(cpu_tss[0]) / sizeof(uint64_t)); i++) {
+        ((uint64_t *)&cpu_tss[0])[i] = 0;
     }
-    tss.rsp0 = (uint64_t)kstack_top;
-    tss.iomap_base = sizeof(tss);
-    set_tss_entry(5, (uint64_t)&tss, sizeof(tss) - 1);
+    cpu_tss[0].rsp0 = (uint64_t)kstack_top;
+    cpu_tss[0].iomap_base = sizeof(cpu_tss[0]);
+    set_tss_entry(5, (uint64_t)&cpu_tss[0], sizeof(cpu_tss[0]) - 1);
     kernel_gdt_ptr.limit = sizeof(gdt) - 1;
     kernel_gdt_ptr.base = (uint64_t)gdt;
     asm volatile(
@@ -71,11 +70,14 @@ void arch_gdt_init(void) {
     asm volatile("ltr %0" : : "r"((uint16_t)GDT_SEL_TSS));
 }
 void arch_gdt_init_ap(void) {
-    for (int i = 0; i < (int)(sizeof(ap_tss) / sizeof(uint64_t)); i++) {
-        ((uint64_t *)&ap_tss)[i] = 0;
+    uint32_t cpu_id = this_cpu()->cpu_id;
+    tss64_t *t = &cpu_tss[cpu_id];
+    for (int i = 0; i < (int)(sizeof(*t) / sizeof(uint64_t)); i++) {
+        ((uint64_t *)t)[i] = 0;
     }
-    ap_tss.rsp0 = (uint64_t)ap_kstack_top;
-    ap_tss.iomap_base = sizeof(ap_tss);
-    set_tss_entry(7, (uint64_t)&ap_tss, sizeof(ap_tss) - 1);
-    asm volatile("ltr %0" : : "r"((uint16_t)GDT_SEL_TSS_AP));
+    t->rsp0 = this_cpu()->kstack_top;
+    t->iomap_base = sizeof(*t);
+    int idx = 5 + 2 * (int)cpu_id;
+    set_tss_entry(idx, (uint64_t)t, sizeof(*t) - 1);
+    asm volatile("ltr %0" : : "r"(GDT_SEL_TSS_CPU(cpu_id)));
 }

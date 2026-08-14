@@ -19,13 +19,6 @@ kstack_bottom:
     .skip 16384
 kstack_top:
 
-.align 16
-.global ap_kstack_bottom
-.global ap_kstack_top
-ap_kstack_bottom:
-    .skip 16384
-ap_kstack_top:
-
 .align 4096
 .global boot_pml4
 boot_pml4:

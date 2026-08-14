@@ -2,6 +2,8 @@
 #include <uacpi/status.h>
 #include <uacpi/uacpi.h>
 #include <uacpi/sleep.h>
+#include <uacpi/tables.h>
+#include <uacpi/acpi.h>
 #include "robu/types.h"
 #include "robu/arch.h"
 #include "robu/kprintf.h"
@@ -470,6 +472,46 @@ int uacpi_glue_shutdown(void) {
         return -1;
     }
     return 0;
+}
+
+struct madt_cpu_ctx {
+    uint32_t *out;
+    int max;
+    int count;
+};
+
+static uacpi_iteration_decision madt_lapic_cb(uacpi_handle user, struct acpi_entry_hdr *hdr) {
+    struct madt_cpu_ctx *ctx = (struct madt_cpu_ctx *)user;
+    if (hdr->type != ACPI_MADT_ENTRY_TYPE_LAPIC) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    struct acpi_madt_lapic *lapic = (struct acpi_madt_lapic *)hdr;
+    if (!(lapic->flags & ACPI_PIC_ENABLED)) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    if (ctx->count < ctx->max) {
+        ctx->out[ctx->count++] = lapic->id;
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+int acpi_enumerate_cpus(uint32_t *apic_ids, int max_ids) {
+    if (uacpi_ensure_subsystem() != 0) {
+        return -1;
+    }
+    uacpi_table tbl;
+    uacpi_status ret = uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &tbl);
+    if (uacpi_unlikely_error(ret)) {
+        kprintf("[uacpi] MADT lookup failed: %s\n", uacpi_status_to_string(ret));
+        return -1;
+    }
+    struct madt_cpu_ctx ctx = { apic_ids, max_ids, 0 };
+    ret = uacpi_for_each_subtable(tbl.hdr, sizeof(struct acpi_madt), madt_lapic_cb, &ctx);
+    if (uacpi_unlikely_error(ret)) {
+        kprintf("[uacpi] MADT subtable iteration failed: %s\n", uacpi_status_to_string(ret));
+        return -1;
+    }
+    return ctx.count;
 }
 
 int uacpi_glue_reboot(void) {

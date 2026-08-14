@@ -102,7 +102,7 @@ void arch_panic_freeze_other_cores(void) {
         if (c == this_cpu()->cpu_id) {
             continue;
         }
-        if (c != 0 && !ap_joined_flag) {
+        if (!cpu_online[c]) {
             continue;
         }
         lapic_send_ipi(percpu_table[c].apic_id, TRAP_VEC_IPI_PANIC);
@@ -127,7 +127,7 @@ void arch_tlb_shootdown(paddr_t aspace, vaddr_t va) {
         if (c == this_cpu()->cpu_id) {
             continue;
         }
-        if (c != 0 && !ap_joined_flag) {
+        if (!cpu_online[c]) {
             continue;
         }
         if (percpu_table[c].loaded_cr3 != aspace) {
