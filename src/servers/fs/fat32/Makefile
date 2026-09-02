@@ -1,0 +1,4 @@
+FAT32FS_DIR := src/servers/fs/fat32
+FAT32FS_COMPILE_SRCS := $(FAT32FS_DIR)/fat32fs.c $(FAT32FS_DIR)/block.c
+FAT32FS_INCLUDED_SRCS := $(FAT32FS_DIR)/disk.c $(FAT32FS_DIR)/vfs.c
+FAT32FS_HDRS := $(FAT32FS_DIR)/fat32.h $(FAT32FS_DIR)/block.h

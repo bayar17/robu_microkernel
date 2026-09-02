@@ -33,9 +33,7 @@ static inline uint64_t rdtsc(void) {
     } while (0)
 
 void rootfs_init(void);
-void rootfs_load_module(void);
 void root_task_init(paddr_t untyped_base, uint64_t untyped_size);
-void ramfs_extract_tree(void);
 
 tid_t pager_init(void);
 tid_t devfs_init(void);
@@ -43,11 +41,14 @@ tid_t console_driver_init(void);
 tid_t ramfs_init(void);
 tid_t procfs_init(void);
 tid_t sysfs_init(void);
-tid_t bootfs_init(void);
 tid_t diskfs_init(void);
+tid_t ext2fs_init(void);
 void bench_init(void);
 
-void abitest_init(paddr_t untyped_base, uint64_t untyped_size);
+void testing_set_untyped(paddr_t untyped_base, uint64_t untyped_size);
+void run_deferred_boot_inits(void);
+
+void abitest_init(void);
 void argvtest_init(void);
 void panic_test_init(void);
 void test_exit_init(void);
@@ -59,6 +60,13 @@ void mousetest_init(void);
 void fbtest_init(void);
 void shmtest_init(void);
 void socktest_init(void);
+void pcitest_init(void);
+tid_t blockdrv_init(void);
+void diskfstest_init(void);
+void fat16fstest_init(void);
+void fat32fstest_init(void);
+void ext2fstest_init(void);
+void linuxvfstest_init(void);
 void sigtest_init(void);
 void readlinetest_init(void);
 void toybox_sh_c_init(void);

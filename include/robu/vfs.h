@@ -20,6 +20,24 @@
 #define VFS_OP_RMDIR   14
 #define VFS_OP_LINK    15
 #define VFS_OP_MKNOD   16
+#define VFS_OP_READ_BULK 17
+#define VFS_OP_CAPS 18
+#define VFS_OP_XATTR 19
+#define VFS_OP_UTIMENS 20
+#define VFS_OP_DEVICE_READ 21
+#define VFS_OP_SEEK 22
+#define ROBU_VFS_ABI_MAJOR 1
+#define ROBU_VFS_ABI_MINOR 2
+#define ROBU_VFS_FEATURE_OPEN      (1ULL << 0)
+#define ROBU_VFS_FEATURE_READ      (1ULL << 1)
+#define ROBU_VFS_FEATURE_WRITE     (1ULL << 2)
+#define ROBU_VFS_FEATURE_STAT      (1ULL << 3)
+#define ROBU_VFS_FEATURE_READDIR   (1ULL << 4)
+#define ROBU_VFS_FEATURE_MUTATE    (1ULL << 5)
+#define ROBU_VFS_FEATURE_SYMLINK   (1ULL << 6)
+#define ROBU_VFS_FEATURE_XATTR     (1ULL << 7)
+#define ROBU_VFS_FEATURE_LINUX_VFS (1ULL << 8)
+#define ROBU_VFS_FEATURE_TIMESTAMPS (1ULL << 9)
 #define VFS_ERR_NOT_FOUND     (-1)
 #define VFS_ERR_BAD_HANDLE    (-2)
 #define VFS_ERR_NOT_SUPPORTED (-3)
@@ -28,6 +46,7 @@
 #define VFS_ERR_EXISTS        (-6)
 #define VFS_ERR_NOT_DIR       (-7)
 #define VFS_ERR_NOT_EMPTY     (-8)
+#define VFS_ERR_INVALID       (-9)
 #define VFS_ERR_WOULDBLOCK    (-10)
 #define VFS_NAME_MAX  20
 #define VFS_PATH_MAX  32
@@ -37,6 +56,49 @@
 #define VFS_O_CREAT  0x0040
 #define VFS_O_TRUNC  0x0200
 #define VFS_O_APPEND 0x0400
+#define VFS_XATTR_GET    1
+#define VFS_XATTR_SET    2
+#define VFS_XATTR_LIST   3
+#define VFS_XATTR_REMOVE 4
+#define VFS_XATTR_CREATE 1
+#define VFS_XATTR_REPLACE 2
+#define VFS_XATTR_FLAGS_SHIFT 32
+#define VFS_XATTR_NAME_MAX 255
+#define VFS_XATTR_VALUE_MAX 1024
+#define VFS_UTIME_OMIT_ATIME 1ULL
+#define VFS_UTIME_OMIT_MTIME 2ULL
+#define VFS_NODE_REG 0
+#define VFS_NODE_DIR 1
+#define VFS_NODE_BLOCK 2
+#define VFS_NODE_CHAR 3
+#define VFS_DEVICE_ROOT_DISK 1
+#define VFS_DEVICE_ROOT_PARTITION 2
+#define VFS_DEVICE_DATA_DISK 3
+#define VFS_SEEK_SET 0
+#define VFS_SEEK_CUR 1
+#define VFS_SEEK_END 2
+typedef struct {
+    uint64_t op;
+} vfs_caps_req_t;
+typedef struct {
+    int64_t status;
+    uint64_t abi;
+    uint64_t features;
+} vfs_caps_reply_t;
+_Static_assert(sizeof(vfs_caps_reply_t) <= 48, "must fit one msg_regs_t");
+typedef struct {
+    uint64_t op;
+    uint64_t command;
+    uint64_t handle;
+    int64_t shmid;
+    uint64_t name_len;
+    uint64_t value_len;
+} vfs_xattr_req_t;
+_Static_assert(sizeof(vfs_xattr_req_t) == 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+    uint64_t value_len;
+} vfs_xattr_reply_t;
 typedef struct {
     uint64_t op;
     uint64_t flags;
@@ -88,7 +150,10 @@ typedef struct {
     uint64_t size;
     uint64_t is_dir;
     uint64_t ino;
+    int64_t atime;
+    int64_t mtime;
 } vfs_stat_reply_t;
+_Static_assert(sizeof(vfs_stat_reply_t) == 48, "must fit one msg_regs_t");
 typedef struct {
     uint64_t op;
     uint64_t dir_ino;
@@ -166,6 +231,41 @@ _Static_assert(sizeof(vfs_mknod_req_t) <= 48, "must fit one msg_regs_t");
 typedef struct {
     int64_t status;
 } vfs_mknod_reply_t;
+typedef struct {
+    uint64_t op;
+    uint64_t handle;
+    uint64_t flags;
+    int64_t atime;
+    int64_t mtime;
+    int64_t ctime;
+} vfs_utimens_req_t;
+_Static_assert(sizeof(vfs_utimens_req_t) == 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+} vfs_utimens_reply_t;
+typedef struct {
+    uint64_t op;
+    uint64_t device;
+    uint64_t offset;
+    uint64_t len;
+} vfs_device_read_req_t;
+_Static_assert(sizeof(vfs_device_read_req_t) <= 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+    uint8_t data[VFS_READ_MAX];
+} vfs_device_read_reply_t;
+_Static_assert(sizeof(vfs_device_read_reply_t) == 48, "must fit one msg_regs_t");
+typedef struct {
+    uint64_t op;
+    uint64_t handle;
+    int64_t offset;
+    uint64_t whence;
+} vfs_seek_req_t;
+_Static_assert(sizeof(vfs_seek_req_t) <= 48, "must fit one msg_regs_t");
+typedef struct {
+    int64_t status;
+    uint64_t offset;
+} vfs_seek_reply_t;
 
 static inline int64_t vfs_mount(const char *prefix) {
     msg_regs_t m = (msg_regs_t){0};
@@ -215,6 +315,41 @@ static inline int64_t vfs_read(tid_t server, uint64_t handle, void *buf, uint64_
         for (int64_t i = 0; i < reply->status; i++) {
             out[i] = reply->data[i];
         }
+    }
+    return reply->status;
+}
+static inline int64_t vfs_device_read(tid_t server, uint64_t device, uint64_t offset,
+                                      void *buf, uint64_t len) {
+    msg_regs_t m = (msg_regs_t){0};
+    vfs_device_read_req_t *req = (vfs_device_read_req_t *)&m;
+    req->op = VFS_OP_DEVICE_READ;
+    req->device = device;
+    req->offset = offset;
+    req->len = len > VFS_READ_MAX ? VFS_READ_MAX : len;
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_device_read_reply_t *reply = (vfs_device_read_reply_t *)&m;
+    if (reply->status > 0) {
+        uint8_t *out = (uint8_t *)buf;
+        for (int64_t i = 0; i < reply->status; i++) {
+            out[i] = reply->data[i];
+        }
+    }
+    return reply->status;
+}
+static inline int64_t vfs_seek(tid_t server, uint64_t handle, int64_t offset,
+                               uint64_t whence, uint64_t *offset_out) {
+    msg_regs_t m = (msg_regs_t){0};
+    vfs_seek_req_t *req = (vfs_seek_req_t *)&m;
+    req->op = VFS_OP_SEEK;
+    req->handle = handle;
+    req->offset = offset;
+    req->whence = whence;
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_seek_reply_t *reply = (vfs_seek_reply_t *)&m;
+    if (offset_out) {
+        *offset_out = reply->offset;
     }
     return reply->status;
 }
@@ -444,6 +579,56 @@ static inline int64_t vfs_quiesce(tid_t server) {
     ipc_call(server, &m, &from);
     vfs_quiesce_reply_t *reply = (vfs_quiesce_reply_t *)&m;
     return reply->status;
+}
+static inline int64_t vfs_caps(tid_t server, uint64_t *abi_out, uint64_t *features_out) {
+    msg_regs_t m = (msg_regs_t){0};
+    vfs_caps_req_t *req = (vfs_caps_req_t *)&m;
+    req->op = VFS_OP_CAPS;
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_caps_reply_t *reply = (vfs_caps_reply_t *)&m;
+    if (reply->status == 0) {
+        if (abi_out) {
+            *abi_out = reply->abi;
+        }
+        if (features_out) {
+            *features_out = reply->features;
+        }
+    }
+    return reply->status;
+}
+static inline int64_t vfs_xattr(tid_t server, uint64_t command, uint64_t handle, int shmid,
+                                uint64_t name_len, uint64_t value_len,
+                                uint64_t *value_len_out) {
+    msg_regs_t m = (msg_regs_t){0};
+    vfs_xattr_req_t *req = (vfs_xattr_req_t *)&m;
+    req->op = VFS_OP_XATTR;
+    req->command = command;
+    req->handle = handle;
+    req->shmid = shmid;
+    req->name_len = name_len;
+    req->value_len = value_len;
+    tid_t from;
+    ipc_call(server, &m, &from);
+    vfs_xattr_reply_t *reply = (vfs_xattr_reply_t *)&m;
+    if (value_len_out) {
+        *value_len_out = reply->value_len;
+    }
+    return reply->status;
+}
+static inline int64_t vfs_utimens(tid_t server, uint64_t handle, uint64_t flags,
+                                  int64_t atime, int64_t mtime, int64_t ctime) {
+    msg_regs_t m = (msg_regs_t){0};
+    vfs_utimens_req_t *req = (vfs_utimens_req_t *)&m;
+    req->op = VFS_OP_UTIMENS;
+    req->handle = handle;
+    req->flags = flags;
+    req->atime = atime;
+    req->mtime = mtime;
+    req->ctime = ctime;
+    tid_t from;
+    ipc_call(server, &m, &from);
+    return ((vfs_utimens_reply_t *)&m)->status;
 }
 static inline void vfs_quiesce_disk(void) {
     tid_t diskfs = (tid_t)kinfo_resolve_mount(kinfo_user(), "/mnt/disk0/", NULL);

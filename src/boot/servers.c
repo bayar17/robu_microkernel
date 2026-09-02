@@ -6,6 +6,7 @@
 #include "robu/ipc.h"
 #include "robu/kinfo.h"
 #include "robu/rootfs.h"
+#include "robu/hwdrv.h"
 #include "../boot.h"
 
 tid_t pager_init(void) {
@@ -62,6 +63,23 @@ tid_t console_driver_init(void) {
     ipc_grant_console_driver(cd->tid);
     kprintf("[boot] console_driver server: tid=%u, granted port-io/console-driver permission\n", cd->tid);
     return cd->tid;
+}
+
+tid_t blockdrv_init(void) {
+    const uint8_t *bd_elf_start, *bd_elf_end;
+    if (rootfs_lookup("blockdrv", &bd_elf_start, &bd_elf_end) != 0) {
+        kprintf("[boot] FATAL: rootfs has no entry named 'blockdrv'\n");
+        for (;;) { asm volatile("cli; hlt"); }
+    }
+    tcb_t *bd = elf_load_and_spawn("blockdrv", bd_elf_start, bd_elf_end, 11, PAGER_TID);
+    if (!bd) {
+        kprintf("[boot] FATAL: blockdrv server failed to load\n");
+        for (;;) { asm volatile("cli; hlt"); }
+    }
+    ipc_grant_hw_driver(bd->tid);
+    kinfo_set_blockdrv_tid(bd->tid);
+    kprintf("[boot] blockdrv server: tid=%u, granted hw-driver permission\n", bd->tid);
+    return bd->tid;
 }
 
 tid_t ramfs_init(void) {
@@ -144,10 +162,28 @@ tid_t diskfs_init(void) {
         for (;;) { asm volatile("cli; hlt"); }
     }
 
-    ipc_grant_blk_owner(diskfs->tid);
+    kinfo_set_diskfs_tid(diskfs->tid);
     kinfo_mount_add("/mnt/disk0/", diskfs->tid);
     kprintf("[boot] diskfs server: tid=%u\n", diskfs->tid);
     return diskfs->tid;
+}
+
+tid_t ext2fs_init(void) {
+    const uint8_t *ext2fs_elf_start, *ext2fs_elf_end;
+    if (rootfs_lookup("ext2fsroot", &ext2fs_elf_start, &ext2fs_elf_end) != 0) {
+        kprintf("[boot] FATAL: rootfs has no entry named 'ext2fsroot'\n");
+        for (;;) { asm volatile("cli; hlt"); }
+    }
+    tcb_t *ext2fs = elf_load_and_spawn("ext2fsroot", ext2fs_elf_start, ext2fs_elf_end, 11, PAGER_TID);
+    if (!ext2fs) {
+        kprintf("[boot] FATAL: ext2fs server failed to load\n");
+        for (;;) { asm volatile("cli; hlt"); }
+    }
+    ipc_grant_hw_driver_secondary(ext2fs->tid);
+    kinfo_set_ext2fs_tid(ext2fs->tid);
+    kinfo_mount_add("/", ext2fs->tid);
+    kprintf("[boot] ext2fs server: tid=%u\n", ext2fs->tid);
+    return ext2fs->tid;
 }
 
 void bench_init(void) {

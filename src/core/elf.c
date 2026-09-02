@@ -29,59 +29,44 @@ static uint32_t prot_from_pflags(uint32_t p_flags) {
     if (p_flags & PF_X) prot |= VM_PROT_EXEC;
     return prot;
 }
-const elf_image_t *elf_parse(const uint8_t *elf_start, const uint8_t *elf_end) {
-    spin_lock(&elf_lock);
-    const elf_image_t *cached = cache_lookup(elf_start);
-    if (cached) {
-        elf_cache_stats.cache_hits++;
-        spin_unlock(&elf_lock);
-        return cached;
-    }
+static int elf_parse_into(const uint8_t *elf_start, const uint8_t *elf_end, elf_image_t *out) {
     uint64_t blob_len = (uint64_t)(elf_end - elf_start);
     if (blob_len < sizeof(elf64_ehdr_t)) {
         kprintf("[elf] image too small to hold an ELF header\n");
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     const elf64_ehdr_t *eh = (const elf64_ehdr_t *)elf_start;
     if (eh->e_ident[0] != ELF_MAGIC0 || eh->e_ident[1] != ELF_MAGIC1 ||
         eh->e_ident[2] != ELF_MAGIC2 || eh->e_ident[3] != ELF_MAGIC3) {
         kprintf("[elf] bad magic\n");
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     if (eh->e_ident[4] != ELFCLASS64 || eh->e_ident[5] != ELFDATA2LSB ||
         eh->e_ident[6] != EV_CURRENT) {
         kprintf("[elf] not a little-endian ELF64 file\n");
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     if (eh->e_machine != EM_X86_64) {
         kprintf("[elf] wrong machine (e_machine=%u, want %u)\n", eh->e_machine, EM_X86_64);
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     if (eh->e_type == ET_DYN) {
         kprintf("[elf] PIE (ET_DYN) not supported -- Stage 2D scope is "
                 "static non-PIE (ET_EXEC) only\n");
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     if (eh->e_type != ET_EXEC) {
         kprintf("[elf] unsupported e_type=%u (want ET_EXEC=%u)\n", eh->e_type, ET_EXEC);
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     if (eh->e_phentsize != sizeof(elf64_phdr_t)) {
         kprintf("[elf] unexpected e_phentsize=%u\n", eh->e_phentsize);
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     uint64_t phtable_end = eh->e_phoff + (uint64_t)eh->e_phnum * eh->e_phentsize;
     if (eh->e_phoff > blob_len || phtable_end > blob_len || phtable_end < eh->e_phoff) {
         kprintf("[elf] program header table out of bounds\n");
-        spin_unlock(&elf_lock);
-        return NULL;
+        return -1;
     }
     elf_image_t img = {0};
     img.elf_start = elf_start;
@@ -96,13 +81,11 @@ const elf_image_t *elf_parse(const uint8_t *elf_start, const uint8_t *elf_end) {
         if (ph->p_filesz > ph->p_memsz || ph->p_offset > blob_len ||
             seg_file_end > blob_len || seg_file_end < ph->p_offset) {
             kprintf("[elf] PT_LOAD segment out of bounds\n");
-            spin_unlock(&elf_lock);
-            return NULL;
+            return -1;
         }
         if (img.nsegs >= ELF_MAX_LOAD_SEGMENTS) {
             kprintf("[elf] too many PT_LOAD segments (max %d)\n", ELF_MAX_LOAD_SEGMENTS);
-            spin_unlock(&elf_lock);
-            return NULL;
+            return -1;
         }
         elf_segment_t *seg = &img.segs[img.nsegs++];
         seg->vaddr = ph->p_vaddr;
@@ -113,6 +96,21 @@ const elf_image_t *elf_parse(const uint8_t *elf_start, const uint8_t *elf_end) {
     }
     if (img.nsegs == 0) {
         kprintf("[elf] no PT_LOAD segments\n");
+        return -1;
+    }
+    *out = img;
+    return 0;
+}
+const elf_image_t *elf_parse(const uint8_t *elf_start, const uint8_t *elf_end) {
+    spin_lock(&elf_lock);
+    const elf_image_t *cached = cache_lookup(elf_start);
+    if (cached) {
+        elf_cache_stats.cache_hits++;
+        spin_unlock(&elf_lock);
+        return cached;
+    }
+    elf_image_t img;
+    if (elf_parse_into(elf_start, elf_end, &img) != 0) {
         spin_unlock(&elf_lock);
         return NULL;
     }
@@ -123,6 +121,16 @@ const elf_image_t *elf_parse(const uint8_t *elf_start, const uint8_t *elf_end) {
     elf_cache_stats.parses++;
     spin_unlock(&elf_lock);
     return &elf_cache[slot];
+}
+static elf_image_t elf_nocache_scratch;
+const elf_image_t *elf_parse_nocache(const uint8_t *elf_start, const uint8_t *elf_end) {
+    spin_lock(&elf_lock);
+    if (elf_parse_into(elf_start, elf_end, &elf_nocache_scratch) != 0) {
+        spin_unlock(&elf_lock);
+        return NULL;
+    }
+    spin_unlock(&elf_lock);
+    return &elf_nocache_scratch;
 }
 tcb_t *elf_load_and_spawn(const char *name, const uint8_t *elf_start,
                           const uint8_t *elf_end, uint8_t prio, tid_t pager_tid) {
@@ -232,8 +240,9 @@ tcb_t *elf_load_and_spawn_req(const char *name, const uint8_t *elf_start,
                               const uint8_t *elf_end, uint8_t prio, tid_t pager_tid,
                               int argc, const char *const *argv,
                               int envc, const char *const *envp,
-                              uint32_t nfds, const void *fds_blob) {
-    const elf_image_t *img = elf_parse(elf_start, elf_end);
+                              uint32_t nfds, const void *fds_blob, int use_cache) {
+    const elf_image_t *img = use_cache ? elf_parse(elf_start, elf_end)
+                                        : elf_parse_nocache(elf_start, elf_end);
     if (!img) {
         return NULL;
     }
@@ -304,8 +313,9 @@ tcb_t *elf_load_and_spawn_req(const char *name, const uint8_t *elf_start,
 int elf_exec_current(tcb_t *cur, const char *name, const uint8_t *elf_start,
                      const uint8_t *elf_end, int argc, const char *const *argv,
                      int envc, const char *const *envp,
-                     uint32_t nfds, const void *fds_blob) {
-    const elf_image_t *img = elf_parse(elf_start, elf_end);
+                     uint32_t nfds, const void *fds_blob, int use_cache) {
+    const elf_image_t *img = use_cache ? elf_parse(elf_start, elf_end)
+                                        : elf_parse_nocache(elf_start, elf_end);
     if (!img) {
         return -1;
     }

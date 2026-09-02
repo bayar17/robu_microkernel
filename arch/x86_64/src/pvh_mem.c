@@ -2,6 +2,7 @@
 #include "robu/arch.h"
 #include "robu/kprintf.h"
 #include "robu/framebuffer.h"
+#include "robu/pmm.h"
 
 #define PVH_MAGIC 0x336ec578u
 #define MB2_MAGIC 0x36d76289u
@@ -168,6 +169,87 @@ int arch_boot_module(paddr_t *out_base, uint64_t *out_len) {
     return 0;
 }
 
+static int str_eq(const char *a, const char *b) {
+    while (*a && *b) {
+        if (*a != *b) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+int arch_boot_module_by_name(const char *name, paddr_t *out_base, uint64_t *out_len) {
+    if (!multiboot2_info_ptr) {
+        return -1;
+    }
+    uint32_t total_size = *(uint32_t *)multiboot2_info_ptr;
+    uint8_t *ptr = (uint8_t *)(multiboot2_info_ptr + 8);
+    while (ptr < (uint8_t *)multiboot2_info_ptr + total_size) {
+        struct mb2_tag *tag = (struct mb2_tag *)ptr;
+        if (tag->type == 0) {
+            break;
+        }
+        if (tag->type == 3) {
+            struct mb2_tag_module *mod = (struct mb2_tag_module *)tag;
+            if (str_eq(mod->cmdline, name)) {
+                *out_base = (paddr_t)mod->mod_start;
+                *out_len = (uint64_t)(mod->mod_end - mod->mod_start);
+                return 0;
+            }
+        }
+        ptr += (tag->size + 7) & ~7;
+    }
+    return -1;
+}
+
+int arch_boot_module_count(void) {
+    if (!multiboot2_info_ptr) {
+        return 0;
+    }
+    int count = 0;
+    uint32_t total_size = *(uint32_t *)multiboot2_info_ptr;
+    uint8_t *ptr = (uint8_t *)(multiboot2_info_ptr + 8);
+    while (ptr < (uint8_t *)multiboot2_info_ptr + total_size) {
+        struct mb2_tag *tag = (struct mb2_tag *)ptr;
+        if (tag->type == 0) {
+            break;
+        }
+        if (tag->type == 3) {
+            count++;
+        }
+        ptr += (tag->size + 7) & ~7;
+    }
+    return count;
+}
+
+int arch_boot_module_at(int index, paddr_t *out_base, uint64_t *out_len) {
+    if (!multiboot2_info_ptr) {
+        return -1;
+    }
+    int cur = 0;
+    uint32_t total_size = *(uint32_t *)multiboot2_info_ptr;
+    uint8_t *ptr = (uint8_t *)(multiboot2_info_ptr + 8);
+    while (ptr < (uint8_t *)multiboot2_info_ptr + total_size) {
+        struct mb2_tag *tag = (struct mb2_tag *)ptr;
+        if (tag->type == 0) {
+            break;
+        }
+        if (tag->type == 3) {
+            if (cur == index) {
+                struct mb2_tag_module *mod = (struct mb2_tag_module *)tag;
+                *out_base = (paddr_t)mod->mod_start;
+                *out_len = (uint64_t)(mod->mod_end - mod->mod_start);
+                return 0;
+            }
+            cur++;
+        }
+        ptr += (tag->size + 7) & ~7;
+    }
+    return -1;
+}
+
 int arch_boot_rsdp(paddr_t *out_rsdp) {
     if (multiboot2_info_ptr) {
         uint32_t total_size = *(uint32_t *)multiboot2_info_ptr;
@@ -222,6 +304,14 @@ int arch_boot_framebuffer(fb_info_t *out) {
     return -1;
 }
 
+static uint64_t region_usable_len(paddr_t addr, uint64_t len) {
+    if (addr >= ROBU_IDENTITY_MAP_LIMIT) {
+        return 0;
+    }
+    uint64_t max_len = ROBU_IDENTITY_MAP_LIMIT - addr;
+    return len < max_len ? len : max_len;
+}
+
 void arch_detect_memory(paddr_t *out_base, uint64_t *out_len) {
     if (multiboot2_info_ptr) {
         uint32_t total_size = *(uint32_t *)multiboot2_info_ptr;
@@ -234,10 +324,16 @@ void arch_detect_memory(paddr_t *out_base, uint64_t *out_len) {
                 uint32_t nentries = (mmap->size - 16) / mmap->entry_size;
                 paddr_t best_base = 0;
                 uint64_t best_len = 0;
+                uint64_t best_usable = 0;
                 for (uint32_t i = 0; i < nentries; i++) {
                     struct mb2_mmap_entry *e = (struct mb2_mmap_entry *)((uint8_t *)mmap->entries + i * mmap->entry_size);
 
-                    if (e->type == 1 && e->len > best_len) {
+                    if (e->type != 1) {
+                        continue;
+                    }
+                    uint64_t usable = region_usable_len((paddr_t)e->addr, e->len);
+                    if (usable > best_usable) {
+                        best_usable = usable;
                         best_base = (paddr_t)e->addr;
                         best_len = e->len;
                     }
@@ -260,8 +356,14 @@ void arch_detect_memory(paddr_t *out_base, uint64_t *out_len) {
             (const struct hvm_memmap_table_entry *)info->memmap_paddr;
         paddr_t best_base = 0;
         uint64_t best_len = 0;
+        uint64_t best_usable = 0;
         for (uint32_t i = 0; i < info->memmap_entries; i++) {
-            if (map[i].type == HVM_MEMMAP_TYPE_RAM && map[i].size > best_len) {
+            if (map[i].type != HVM_MEMMAP_TYPE_RAM) {
+                continue;
+            }
+            uint64_t usable = region_usable_len(map[i].addr, map[i].size);
+            if (usable > best_usable) {
+                best_usable = usable;
                 best_base = map[i].addr;
                 best_len = map[i].size;
             }

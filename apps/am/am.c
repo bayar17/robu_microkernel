@@ -149,7 +149,7 @@ static void load_dir(const char *path) {
         if (str_eq(name_buf, ".") || str_eq(name_buf, "..")) continue;
 
         str_copy(entries[entry_count].name, name_buf, VFS_NAME_MAX);
-        entries[entry_count].is_dir = item_is_dir;
+        entries[entry_count].is_dir = item_is_dir == VFS_NODE_DIR;
         entry_count++;
     }
 }

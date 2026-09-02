@@ -233,6 +233,25 @@ int shm_ctl(int shmid, int cmd, uint64_t out_words[6]) {
     return IPC_ERR_INVALID;
 }
 
+int shm_copy_out(int shmid, void *dst, uint64_t max_len, uint64_t *out_len) {
+    shm_segment_t *s = find_segment(shmid);
+    if (!s) {
+        return IPC_ERR_NOT_FOUND;
+    }
+    uint64_t total = s->size < max_len ? s->size : max_len;
+    uint64_t copied = 0;
+    uint8_t *out = (uint8_t *)dst;
+    for (uint64_t i = 0; i < s->npages && copied < total; i++) {
+        uint64_t chunk = total - copied;
+        if (chunk > PAGE_SIZE_4K) {
+            chunk = PAGE_SIZE_4K;
+        }
+        memcpy(out + copied, (const void *)s->frames[i], chunk);
+        copied += chunk;
+    }
+    *out_len = copied;
+    return IPC_ERR_NONE;
+}
 void shm_detach_all_for_process(paddr_t address_space) {
     for (int i = 0; i < MAX_SHM_ATTACHES; i++) {
         if (attaches[i].in_use && attaches[i].address_space == address_space) {

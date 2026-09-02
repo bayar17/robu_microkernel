@@ -16,34 +16,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang lld llvm make flex bison mtools xorriso grub-pc-bin grub-common qemu-system-x86 meson libc++-dev libc++abi-dev
+            clang lld llvm make flex bison mtools e2fsprogs qemu-system-x86 meson libc++-dev libc++abi-dev
 
-      - name: Build ISO
+      - name: Build kernel disk image
         run: |
-          make BUILD_SYS=clang iso
+          make BUILD_SYS=clang all
+          make BUILD_SYS=clang bootloader-kernel-disk
 
       - name: Test boot in QEMU
         run: |
+          truncate -s 16M build/diskfs.img
           timeout 8s qemu-system-x86_64 \
-            -cdrom build/robu_kernel.iso \
+            -drive file=build/robu-kernel-disk.img,format=raw -boot c \
+            -drive file=build/diskfs.img,format=raw,if=none,id=blk0 \
+            -device virtio-blk-pci,drive=blk0 \
             -nographic \
             -device isa-debug-exit,iobase=0xf4,iosize=0x04 || code=$?
           echo "QEMU exit code: ${code:-0}"
 
-      - name: Upload ISO
+      - name: Upload Kernel Disk Image
         uses: actions/upload-artifact@v4
         with:
-          name: robu_kernel.iso
-          path: build/robu_kernel.iso
+          name: robu-kernel-disk.img
+          path: build/robu-kernel-disk.img
 
       - name: Upload Kernel Binary
         uses: actions/upload-artifact@v4
         with:
           name: robu_kernel
           path: build/robu_kernel
-
-      - name: Upload RootFS Tar
-        uses: actions/upload-artifact@v4
-        with:
-          name: rootfs.tar
-          path: build/rootfs.tar

@@ -1,0 +1,3 @@
+#ifndef ROBU_BUSYBOX_STATFS_H
+#define ROBU_BUSYBOX_STATFS_H
+#endif

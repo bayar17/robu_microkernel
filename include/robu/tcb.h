@@ -20,7 +20,8 @@ typedef enum {
     THREAD_STATE_DEAD,
     THREAD_STATE_ZOMBIE,
     THREAD_STATE_WAIT_CHILD,
-    THREAD_STATE_WAIT_CONSOLE
+    THREAD_STATE_WAIT_CONSOLE,
+    THREAD_STATE_WAIT_EXECREQ
 } thread_state_t;
 typedef struct {
     uint64_t word[6];
@@ -47,6 +48,7 @@ typedef struct tcb {
     tid_t pager_tid;
     tid_t parent_tid;
     tid_t wait_filter;
+    uint32_t execreq_slot;
     uint32_t last_cpu;
     tid_t pgid;
     tid_t sid;

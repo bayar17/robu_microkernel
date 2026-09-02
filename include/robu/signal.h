@@ -32,7 +32,7 @@
 #define SIGIO     29
 #define SIGPWR    30
 #define SIGSYS    31
-#define ROBU_NSIG 32
+#define ROBU_NSIG 64
 #define ROBU_SIG_DFL 0
 #define ROBU_SIG_IGN 1
 #define SA_NOCLDSTOP 1

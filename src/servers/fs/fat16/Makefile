@@ -1,0 +1,4 @@
+FAT16FS_DIR := src/servers/fs/fat16
+FAT16FS_COMPILE_SRCS := $(FAT16FS_DIR)/fat16fs.c $(FAT16FS_DIR)/block.c
+FAT16FS_INCLUDED_SRCS := $(FAT16FS_DIR)/disk.c $(FAT16FS_DIR)/vfs.c
+FAT16FS_HDRS := $(FAT16FS_DIR)/fat16.h $(FAT16FS_DIR)/block.h

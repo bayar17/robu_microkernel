@@ -325,7 +325,12 @@ static int ps2_getc(void) {
 
     if (scancode < 128) {
         char c = shift_pressed ? scancode_ascii_shift[scancode] : scancode_ascii[scancode];
-        if (c) return (int)(uint8_t)c;
+        if (c) {
+            if (ctrl_pressed && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+                c = (char)(c & 0x1F);
+            }
+            return (int)(uint8_t)c;
+        }
     }
     return -1;
 }

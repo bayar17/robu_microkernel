@@ -1,0 +1,26 @@
+--- a/libbb/find_pid_by_name.c
++++ b/libbb/find_pid_by_name.c
+@@ -85,7 +85,7 @@ pid_t* FAST_FUNC find_pid_by_name(const char *procName)
+ 	p = NULL;
+ 
+ 	pidList = xzalloc(sizeof(*pidList));
+-	while ((p = procps_scan(p, PSSCAN_PID|PSSCAN_COMM|PSSCAN_ARGVN|PSSCAN_EXE))) {
++	while ((p = procps_scan(p, PSSCAN_PID|PSSCAN_COMM|PSSCAN_ARGVN))) {
+ 		if (comm_match(p, procName)
+		/* or we require argv0 to match (essential for matching reexeced /proc/self/exe)*/
+		 || (p->argv0 && strcmp(bb_basename(p->argv0), procName) == 0)
+--- a/coreutils/tee.c
++++ b/coreutils/tee.c
+@@ -142,7 +142,11 @@ int tee_main(int argc, char **argv)
+ 	files[0] = stdin;
+ 	do {	/* Now check for input and output errors. */
+ 		/* Checking ferror should be sufficient, but we may want to fclose.
+-		 * If we do, remember not to close stdin! */
+-		die_if_ferror(*fp++, *np++);
++		 * If we do, remember not to close stdin! */
++		die_if_ferror(*fp, *np);
++		if (fp != files && fclose(*fp))
++			retval = EXIT_FAILURE;
++		fp++;
++		np++;
+ 	} while (*fp);

@@ -21,4 +21,6 @@ int vbe_set_mode(uint32_t width, uint32_t height, uint32_t bpp, fb_info_t *out);
 void fbconsole_init(const fb_info_t *fb);
 void fbconsole_putc(char c);
 void fbconsole_clear(void);
+void fbconsole_redraw(const uint16_t *cells, uint32_t cols, uint32_t rows,
+                      uint32_t cursor_row, uint32_t cursor_col);
 #endif

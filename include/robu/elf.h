@@ -63,6 +63,7 @@ typedef struct {
 } elf_cache_stats_t;
 extern elf_cache_stats_t elf_cache_stats;
 const elf_image_t *elf_parse(const uint8_t *elf_start, const uint8_t *elf_end);
+const elf_image_t *elf_parse_nocache(const uint8_t *elf_start, const uint8_t *elf_end);
 tcb_t *elf_load_and_spawn(const char *name, const uint8_t *elf_start,
                           const uint8_t *elf_end, uint8_t prio, tid_t pager_tid);
 tcb_t *elf_load_and_spawn_argv(const char *name, const uint8_t *elf_start,
@@ -72,9 +73,9 @@ tcb_t *elf_load_and_spawn_req(const char *name, const uint8_t *elf_start,
                               const uint8_t *elf_end, uint8_t prio, tid_t pager_tid,
                               int argc, const char *const *argv,
                               int envc, const char *const *envp,
-                              uint32_t nfds, const void *fds_blob);
+                              uint32_t nfds, const void *fds_blob, int use_cache);
 int elf_exec_current(tcb_t *cur, const char *name, const uint8_t *elf_start,
                      const uint8_t *elf_end, int argc, const char *const *argv,
                      int envc, const char *const *envp,
-                     uint32_t nfds, const void *fds_blob);
+                     uint32_t nfds, const void *fds_blob, int use_cache);
 #endif

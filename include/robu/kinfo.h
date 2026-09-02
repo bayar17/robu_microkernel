@@ -1,13 +1,17 @@
 #ifndef ROBU_KINFO_H
 #define ROBU_KINFO_H
 #include "robu/types.h"
+#include "robu/blockinfo.h"
 #define KINFO_VA 0x0000000080000000ULL
 #define ROBU_ABI_VERSION_MAJOR 1
-#define ROBU_ABI_VERSION_MINOR 0
+#define ROBU_ABI_VERSION_MINOR 2
 #define KINFO_FEATURE_SMP        (1ULL << 0)
 #define KINFO_FEATURE_ELF_LOADER (1ULL << 1)
+#define KINFO_FEATURE_RANDOM     (1ULL << 2)
+#define KINFO_FEATURE_ROBU_VFS   (1ULL << 3)
+#define KINFO_FEATURE_LINUX_VFS  (1ULL << 4)
 #define MOUNT_PREFIX_MAX 24
-#define MOUNT_TABLE_MAX  8
+#define MOUNT_TABLE_MAX  16
 typedef struct {
     uint32_t in_use;
     uint32_t owner_tid;
@@ -31,8 +35,17 @@ typedef struct {
     uint32_t abitest_exit_helper_tid;
     uint32_t procfs_tid;
     uint32_t sysfs_tid;
+    uint32_t blockdrv_tid;
+    uint32_t ext2fs_tid;
     mount_entry_t mounts[MOUNT_TABLE_MAX];
     volatile uint32_t mount_seq;
+    uint32_t vfs_abi_major;
+    uint32_t vfs_abi_minor;
+    uint64_t robu_vfs_feature_bits;
+    uint64_t linux_vfs_feature_bits;
+    block_device_info_t block_devices[BLOCK_DEVICE_MAX];
+    volatile uint32_t block_info_seq;
+    uint32_t diskfs_tid;
 } kinfo_page_t;
 static inline uint64_t kinfo_read_ticks(const volatile kinfo_page_t *k) {
     uint32_t seq0, seq1;
@@ -95,6 +108,9 @@ void kinfo_set_ramfs_tid(uint32_t tid);
 void kinfo_set_abitest_exit_helper_tid(uint32_t tid);
 void kinfo_set_procfs_tid(uint32_t tid);
 void kinfo_set_sysfs_tid(uint32_t tid);
+void kinfo_set_blockdrv_tid(uint32_t tid);
+void kinfo_set_ext2fs_tid(uint32_t tid);
+void kinfo_set_diskfs_tid(uint32_t tid);
 
 int kinfo_mount_add(const char *prefix, uint32_t owner_tid);
 static inline const kinfo_page_t *kinfo_user(void) {

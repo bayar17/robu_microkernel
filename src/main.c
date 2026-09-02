@@ -11,16 +11,15 @@
 #include "robu/untyped.h"
 #include "robu/dma.h"
 #include "robu/kheap.h"
-#include "robu/virtio_blk.h"
 #include "robu/framebuffer.h"
+#include "robu/random.h"
 #include "lapic.h"
 #include "smp.h"
 #include "percpu.h"
-#include "pci.h"
 #include "boot.h"
 
-#define UNTYPED_REGION_SIZE (128u * 1024)
-#define DMA_REGION_SIZE (256u * 1024)
+#define UNTYPED_REGION_SIZE (32u * 1024 * 1024)
+#define DMA_REGION_SIZE (8u * 1024 * 1024)
 #define ACPI_HEAP_REGION_SIZE (2u * 1024 * 1024)
 
 int quiet_mode;
@@ -38,39 +37,6 @@ static void monitor_entry(void) {
                        from, m.word[0], m.word[1], m.word[3]);
         }
     }
-}
-
-static int blk_self_test_one(uint64_t sector, uint32_t count, uint8_t seed) {
-    static uint8_t pattern[8 * 512];
-    static uint8_t readback[8 * 512];
-    uint32_t bytes = count * 512;
-    for (uint32_t i = 0; i < bytes; i++) {
-        pattern[i] = (uint8_t)(i * 37 + seed);
-        readback[i] = 0;
-    }
-    if (virtio_blk_write(sector, count, pattern) != 0) {
-        kprintf("[blktest] sector=%lu count=%u write FAILED\n", sector, count);
-        return -1;
-    }
-    if (virtio_blk_read(sector, count, readback) != 0) {
-        kprintf("[blktest] sector=%lu count=%u read FAILED\n", sector, count);
-        return -1;
-    }
-    for (uint32_t i = 0; i < bytes; i++) {
-        if (pattern[i] != readback[i]) {
-            kprintf("[blktest] sector=%lu count=%u MISMATCH at byte %u: wrote %u read %u\n",
-                    sector, count, i, pattern[i], readback[i]);
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static void blk_self_test(void) {
-    if (blk_self_test_one(0, 1, 11) != 0) return;
-    if (blk_self_test_one(1000, 1, 77) != 0) return;
-    if (blk_self_test_one(5000, 8, 200) != 0) return;
-    kprintf("[blktest] PASS\n");
 }
 
 void kmain(void) {
@@ -94,6 +60,23 @@ void kmain(void) {
     paddr_t mod_base = 0;
     uint64_t mod_len = 0;
     arch_boot_module(&mod_base, &mod_len);
+
+    paddr_t reserve_bases[PMM_MAX_RESERVED_REGIONS];
+    uint64_t reserve_lens[PMM_MAX_RESERVED_REGIONS];
+    int nreserved = arch_boot_module_count();
+    if (nreserved > PMM_MAX_RESERVED_REGIONS) {
+        nreserved = PMM_MAX_RESERVED_REGIONS;
+    }
+    if (nreserved > 0) {
+        for (int i = 0; i < nreserved; i++) {
+            arch_boot_module_at(i, &reserve_bases[i], &reserve_lens[i]);
+        }
+    } else {
+        reserve_bases[0] = mod_base;
+        reserve_lens[0] = mod_len;
+        nreserved = 1;
+    }
+
     quiet_mode = cmdline_get("quiet") != NULL;
     uint64_t effective_len = mem_len;
     if (mem_base < ROBU_IDENTITY_MAP_LIMIT) {
@@ -117,7 +100,7 @@ void kmain(void) {
     paddr_t dma_region_base = mem_base + pmm_len;
     paddr_t untyped_base = dma_region_base + DMA_REGION_SIZE;
     paddr_t acpi_heap_base = untyped_base + UNTYPED_REGION_SIZE;
-    pmm_init(mem_base, pmm_len, mod_base, mod_len);
+    pmm_init(mem_base, pmm_len, reserve_bases, reserve_lens, nreserved);
     extern paddr_t boot_pml4;
     fb_info_t fb;
     int have_fb = (arch_boot_framebuffer(&fb) == 0 && fb.type == 1);
@@ -125,12 +108,12 @@ void kmain(void) {
         have_fb = (vbe_set_mode(1024, 768, 32, &fb) == 0);
     }
     if (have_fb) {
+        arch_vm_enable_framebuffer_write_combining();
         uint64_t fb_size = (uint64_t)fb.pitch * fb.height;
         uint64_t page_count = (fb_size + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K;
         for (uint64_t i = 0; i < page_count; i++) {
-            arch_vm_map_page((paddr_t)&boot_pml4, FRAMEBUFFER_VA + i * PAGE_SIZE_4K,
-                              (paddr_t)(fb.phys_addr + i * PAGE_SIZE_4K),
-                              VM_PROT_READ | VM_PROT_WRITE);
+            arch_vm_map_framebuffer_page((paddr_t)&boot_pml4, FRAMEBUFFER_VA + i * PAGE_SIZE_4K,
+                                         (paddr_t)(fb.phys_addr + i * PAGE_SIZE_4K));
         }
         fbconsole_init(&fb);
         kprintf("[boot] framebuffer: phys=0x%lx virt=0x%lx %ux%u pitch=%u bpp=%u type=%u\n",
@@ -147,19 +130,13 @@ void kmain(void) {
     kprintf("[boot] frames: total=%lu free=%lu\n",
             pmm_stats.total_frames, pmm_stats.free_frames);
 
-    rootfs_load_module();
-
     arch_gdt_init();
     arch_intr_init();
     vm_init();
     lapic_init();
-    pci_log_devices();
-    virtio_blk_init();
-    if (virtio_blk_present() && cmdline_get("blktest")) {
-        blk_self_test();
-    }
     arch_timer_calibrate();
     arch_timer_percpu_init();
+    random_init();
     kinfo_init(lapic_id(), 2);
     sig_trampoline_init();
     extern uint8_t kstack_top[];
@@ -174,39 +151,17 @@ void kmain(void) {
     root_task_init(untyped_base, UNTYPED_REGION_SIZE);
     devfs_init();
     console_driver_init();
-    ramfs_init();
+    ext2fs_init();
     procfs_init();
     sysfs_init();
-    bootfs_init();
+    kprintf("[boot] starting blockdrv\n");
+    blockdrv_init();
+    kprintf("[boot] starting diskfs\n");
     diskfs_init();
-    bench_init();
-    abitest_init(untyped_base, UNTYPED_REGION_SIZE);
-    argvtest_init();
-    panic_test_init();
-    test_exit_init();
-    toybox_cmd_init("true", 9);
-    toybox_cmd_init("false", 9);
-    toybox_cmd_init("pwd", 9);
-    toybox_cmd_init("touch", 9);
-    toybox_cmd_init_arg("cat", 9, "/dev/null");
-    toybox_cmd_init_arg("tail", 9, "/dev/null");
-    toybox_cmd_init("file", 9);
-    toybox_cmd_init("find", 9);
-    toybox_cmd_init("cp", 9);
-    toybox_cmd_init("mv", 9);
-    toybox_cmd_init("ls", 9);
-    libctest_init();
-    ramfstest_init();
-    spawntest_init();
-    sigtest_init();
-    consoletest_init();
-    mousetest_init();
-    fbtest_init();
-    shmtest_init();
-    socktest_init();
-    readlinetest_init();
-    toybox_sh_c_init();
 
+    testing_set_untyped(untyped_base, UNTYPED_REGION_SIZE);
+
+    kprintf("[boot] starting scheduler\n");
     scheduler_ready = 1;
     sched_start();
 }

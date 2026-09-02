@@ -72,7 +72,7 @@ The standard objection is real: pushing services into user space converts functi
 ---
 ## Clone and Build
 
-Robu Microkernel uses several external projects, including [mlibc](https://github.com/managarm/mlibc), [minibox](https://github.com/Qwer-TeX/minibox), [libconfuse](https://github.com/libconfuse/libconfuse), [Bash](https://savannah.gnu.org/projects/bash/), and [Readline](https://savannah.gnu.org/projects/readline/).
+Robu Microkernel uses several external projects, including [mlibc](https://github.com/managarm/mlibc), [BusyBox](https://busybox.net/), [libconfuse](https://github.com/libconfuse/libconfuse), [Bash](https://savannah.gnu.org/projects/bash/), and [Readline](https://savannah.gnu.org/projects/readline/).
 
 Clone the repository together with its submodules:
 
@@ -99,16 +99,10 @@ Build **mlibc**:
 make mlibc
 ```
 
-Build **minibox**, which provides the POSIX-style userspace utility set:
+Build **BusyBox**, which provides the POSIX-style userspace utility set:
 
 ```sh
-make minibox
-```
-
-Build **minibox's shell**:
-
-```sh
-make sh
+make busybox
 ```
 
 Build **Readline**:
@@ -126,23 +120,23 @@ make bash-build
 
 If a component fails to build, rebuilding it separately can make it easier to identify and diagnose the problem.
 
-### Build a Bootable ISO
+### Build a Bootable Disk Image
 
-Once the kernel and root filesystem have been built, create a bootable ISO with:
+Once the kernel and root filesystem have been built, create a bootable disk image with Robu's own BIOS bootloader (stage1/stage2, no GRUB):
 
 ```sh
-make iso
+make bootloader-kernel-disk
 ```
 
 The resulting image is:
 
 ```text
-build/robu_kernel.iso
+build/robu-kernel-disk.img
 ```
 
 ### Run in QEMU
 
-To build the ISO and boot Robu directly in QEMU:
+To build the disk image and boot Robu directly in QEMU:
 
 ```sh
 make run
@@ -156,6 +150,5 @@ The kernel exposes a small, deliberately boring set of primitives around threads
 ## License
  
 MIT. See [LICENSE](LICENSE).
-
 
 

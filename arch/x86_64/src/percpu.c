@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include "percpu.h"
+#include "robu/vm.h"
 percpu_t percpu_table[MAX_CPUS];
 _Static_assert(offsetof(percpu_t, kstack_top) == PERCPU_OFF_KSTACK_TOP,
                "trap.S reads kstack_top at a hardcoded gs-relative offset");
@@ -15,6 +16,7 @@ struct tcb *percpu_current_thread(uint32_t cpu_id) {
     return percpu_table[cpu_id].current_thread;
 }
 void percpu_init_this_cpu(uint32_t cpu_id, uint32_t apic_id, void *kstack_top) {
+    arch_vm_enable_framebuffer_write_combining();
     percpu_t *p = &percpu_table[cpu_id];
     p->self = p;
     p->kstack_top = (uint64_t)kstack_top;

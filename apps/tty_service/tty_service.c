@@ -17,6 +17,13 @@ int main(int argc, char **rc_argv) {
     static char rc_shell[64] = "sh";
     static char rc_tty[32] = "auto";
 
+    if (argc > 2 && strcmp(rc_argv[2], "--wait-gate") == 0) {
+        char token;
+        if (read(STDIN_FILENO, &token, 1) != 1) {
+            return 1;
+        }
+    }
+
     static cfg_opt_t rc_opts[] = {
         CFG_STR("shell", "sh", CFGF_NONE),
         CFG_BOOL("respawn", cfg_true, CFGF_NONE),
@@ -68,9 +75,6 @@ int main(int argc, char **rc_argv) {
 
     if (chosen[0]) {
         setenv("ROBU_TTY_DEV", chosen, 1);
-        printf("[tty_service] using /dev/%s\n", chosen);
-    } else {
-        printf("[tty_service] no tty interface available, running without a tty\n");
     }
 
     if (tty_fd >= 0) {

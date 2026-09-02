@@ -2,6 +2,13 @@
 #include "robu/uipc.h"
 #include "robu/ipc.h"
 #include "robu/vfs.h"
+#include "robu/kprintf.h"
+#define DISKFS_AF_UNIX 1
+#define DISKFS_SOCK_STREAM 1
+#define DISKFS_BLOCKDRV_SOCK_PATH "/tmp/.blockdrv"
+#define DISKFS_BLOCKDRV_SHM_KEY 0x424C4B44
+#define DISKFS_OP_READ  0
+#define DISKFS_OP_WRITE 1
 #define DISKFS_MAX_FILES     24
 #define DISKFS_MAX_HANDLES   16
 #define DISKFS_NAME_MAX      32
@@ -54,82 +61,202 @@ static void zero_bytes(void *dst_, uint64_t n) {
     }
 }
 
-#define BLK_CHUNK_READ_MAX 40
-#define BLK_CHUNK_WRITE_MAX 24
-static int blk_load(uint32_t block_num) {
+static int g_blk_sockid = -1;
+static volatile uint8_t *g_blk_shm_buf;
+
+static int64_t sock_create_call(int domain, int type, int *out_id) {
     msg_regs_t m = (msg_regs_t){0};
-    m.word[0] = 0;
-    m.word[1] = (uint64_t)block_num * DISKFS_SECTORS_PER_BLOCK;
-    m.word[2] = DISKFS_SECTORS_PER_BLOCK;
-    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_BLK_IO, &m, NULL);
-    return rc == IPC_ERR_NONE ? 0 : -1;
-}
-static int blk_read_chunk(uint32_t offset, uint8_t *out, uint32_t *len_out) {
-    msg_regs_t m = (msg_regs_t){0};
-    m.word[0] = 1;
-    m.word[1] = offset;
-    int64_t n = robu_ipc_raw(0, 0, IPC_FLAG_BLK_IO, &m, NULL);
-    if (n < 0) {
-        return -1;
+    m.word[0] = SYS_INFO_CAT_SOCK_CREATE;
+    m.word[1] = (uint64_t)domain;
+    m.word[2] = (uint64_t)type;
+    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+    if (rc == IPC_ERR_NONE) {
+        *out_id = (int)(int64_t)m.word[0];
     }
-    uint64_t words[5] = { m.word[0], m.word[1], m.word[2], m.word[3], m.word[4] };
-    copy_bytes(out, words, n);
-    *len_out = (uint32_t)n;
-    return 0;
+    return rc;
 }
-static int blk_write_chunk(uint32_t offset, const uint8_t *data, uint32_t len) {
+static void pack_path(uint64_t words[4], const char *path) {
+    for (int i = 0; i < 4; i++) {
+        words[i] = 0;
+    }
+    for (int i = 0; path[i] && i < 32; i++) {
+        words[i / 8] |= ((uint64_t)(uint8_t)path[i]) << (8 * (i % 8));
+    }
+}
+static int64_t sock_connect_call(int sockid, const char *path) {
     msg_regs_t m = (msg_regs_t){0};
-    m.word[0] = 2;
-    m.word[1] = offset;
-    m.word[2] = len;
-    uint8_t buf[BLK_CHUNK_WRITE_MAX] = {0};
-    copy_bytes(buf, data, len);
-    uint64_t words[3];
-    copy_bytes(words, buf, BLK_CHUNK_WRITE_MAX);
+    m.word[0] = SYS_INFO_CAT_SOCK_CONNECT;
+    m.word[1] = (uint64_t)(int64_t)sockid;
+    uint64_t w[4];
+    pack_path(w, path);
+    m.word[2] = w[0];
+    m.word[3] = w[1];
+    m.word[4] = w[2];
+    m.word[5] = w[3];
+    return robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+}
+static int64_t sock_read_call(int sockid, uint8_t *buf, int max, int *out_n) {
+    msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = SYS_INFO_CAT_SOCK_READ;
+    m.word[1] = (uint64_t)(int64_t)sockid;
+    m.word[2] = (uint64_t)max;
+    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+    if (rc == IPC_ERR_NONE) {
+        int n = (int)m.word[0];
+        uint64_t words[5] = { m.word[1], m.word[2], m.word[3], m.word[4], m.word[5] };
+        for (int i = 0; i < n; i++) {
+            buf[i] = (uint8_t)(words[i / 8] >> (8 * (i % 8)));
+        }
+        *out_n = n;
+    }
+    return rc;
+}
+static int64_t sock_write_call(int sockid, const uint8_t *buf, int len, int *out_n) {
+    msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = SYS_INFO_CAT_SOCK_WRITE;
+    m.word[1] = (uint64_t)(int64_t)sockid;
+    int chunk = len > 24 ? 24 : len;
+    m.word[2] = (uint64_t)chunk;
+    uint64_t words[3] = {0, 0, 0};
+    for (int i = 0; i < chunk; i++) {
+        words[i / 8] |= ((uint64_t)buf[i]) << (8 * (i % 8));
+    }
     m.word[3] = words[0];
     m.word[4] = words[1];
     m.word[5] = words[2];
-    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_BLK_IO, &m, NULL);
-    return rc == IPC_ERR_NONE ? 0 : -1;
+    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+    if (rc == IPC_ERR_NONE) {
+        *out_n = (int)m.word[0];
+    }
+    return rc;
 }
-static int blk_commit(uint32_t block_num) {
+static void sock_read_bytes(int sockid, uint8_t *buf, int len) {
+    int total = 0;
+    while (total < len) {
+        int n = 0;
+        int64_t rc = sock_read_call(sockid, buf + total, len - total, &n);
+        if (rc == IPC_ERR_NONE) {
+            total += n;
+        }
+        if (total < len) {
+            ipc_sleep(1);
+        }
+    }
+}
+static void sock_write_bytes(int sockid, const uint8_t *buf, int len) {
+    int total = 0;
+    while (total < len) {
+        int n = 0;
+        if (sock_write_call(sockid, buf + total, len - total, &n) == IPC_ERR_NONE) {
+            total += n;
+        } else {
+            ipc_sleep(1);
+        }
+    }
+}
+static int64_t shm_get_call(int key, uint64_t size, uint32_t shmflg, int *out_id) {
     msg_regs_t m = (msg_regs_t){0};
-    m.word[0] = 3;
-    m.word[1] = (uint64_t)block_num * DISKFS_SECTORS_PER_BLOCK;
-    m.word[2] = DISKFS_SECTORS_PER_BLOCK;
-    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_BLK_IO, &m, NULL);
-    return rc == IPC_ERR_NONE ? 0 : -1;
+    m.word[0] = SYS_INFO_CAT_SHM_GET;
+    m.word[1] = (uint64_t)(int64_t)key;
+    m.word[2] = size;
+    m.word[3] = shmflg;
+    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+    if (rc == IPC_ERR_NONE) {
+        *out_id = (int)(int64_t)m.word[0];
+    }
+    return rc;
 }
+static int64_t shm_at_call(int shmid, uint32_t shmflg, uint64_t *out_va) {
+    msg_regs_t m = (msg_regs_t){0};
+    m.word[0] = SYS_INFO_CAT_SHM_AT;
+    m.word[1] = (uint64_t)(int64_t)shmid;
+    m.word[2] = 0;
+    m.word[3] = shmflg;
+    int64_t rc = robu_ipc_raw(0, 0, IPC_FLAG_SYS_INFO, &m, NULL);
+    if (rc == IPC_ERR_NONE) {
+        *out_va = m.word[0];
+    }
+    return rc;
+}
+
+static void blockdrv_connect(void) {
+    sock_create_call(DISKFS_AF_UNIX, DISKFS_SOCK_STREAM, &g_blk_sockid);
+    while (sock_connect_call(g_blk_sockid, DISKFS_BLOCKDRV_SOCK_PATH) != IPC_ERR_NONE) {
+        ipc_sleep(1);
+    }
+    int shmid = -1;
+    while (shm_get_call(DISKFS_BLOCKDRV_SHM_KEY, 0, 0, &shmid) != IPC_ERR_NONE) {
+        ipc_sleep(1);
+    }
+    uint64_t va = 0;
+    while (shm_at_call(shmid, 0, &va) != IPC_ERR_NONE) {
+        ipc_sleep(1);
+    }
+    g_blk_shm_buf = (volatile uint8_t *)va;
+}
+
 static int diskfs_read_block(uint32_t block_num, uint8_t *buf) {
-    if (blk_load(block_num) != 0) {
+    uint64_t req[3] = { DISKFS_OP_READ, (uint64_t)block_num * DISKFS_SECTORS_PER_BLOCK,
+                         DISKFS_SECTORS_PER_BLOCK };
+    sock_write_bytes(g_blk_sockid, (const uint8_t *)req, sizeof(req));
+    uint64_t status = 0;
+    sock_read_bytes(g_blk_sockid, (uint8_t *)&status, sizeof(status));
+    if (status != 0) {
         return -1;
     }
-    uint32_t off = 0;
-    while (off < DISKFS_BLOCK_SIZE) {
-        uint32_t n = 0;
-        if (blk_read_chunk(off, buf + off, &n) != 0) {
-            return -1;
-        }
-        if (n == 0) {
-            break;
-        }
-        off += n;
+    for (uint32_t i = 0; i < DISKFS_BLOCK_SIZE; i++) {
+        buf[i] = g_blk_shm_buf[i];
     }
     return 0;
 }
 static int diskfs_write_block(uint32_t block_num, const uint8_t *buf) {
-    uint32_t off = 0;
-    while (off < DISKFS_BLOCK_SIZE) {
-        uint32_t len = DISKFS_BLOCK_SIZE - off;
-        if (len > BLK_CHUNK_WRITE_MAX) {
-            len = BLK_CHUNK_WRITE_MAX;
-        }
-        if (blk_write_chunk(off, buf + off, len) != 0) {
-            return -1;
-        }
-        off += len;
+    for (uint32_t i = 0; i < DISKFS_BLOCK_SIZE; i++) {
+        g_blk_shm_buf[i] = buf[i];
     }
-    return blk_commit(block_num);
+    uint64_t req[3] = { DISKFS_OP_WRITE, (uint64_t)block_num * DISKFS_SECTORS_PER_BLOCK,
+                         DISKFS_SECTORS_PER_BLOCK };
+    sock_write_bytes(g_blk_sockid, (const uint8_t *)req, sizeof(req));
+    uint64_t status = 0;
+    sock_read_bytes(g_blk_sockid, (uint8_t *)&status, sizeof(status));
+    return status == 0 ? 0 : -1;
+}
+static void handle_device_read(msg_regs_t *m, tid_t from) {
+    const vfs_device_read_req_t *req = (const vfs_device_read_req_t *)m;
+    vfs_device_read_reply_t *reply = (vfs_device_read_reply_t *)m;
+    if (from != (tid_t)kinfo_user()->devfs_tid || req->device != VFS_DEVICE_DATA_DISK) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
+    block_device_info_t info = kinfo_user()->block_devices[BLOCK_DEVICE_DATA - 1];
+    uint64_t capacity = info.sectors * (uint64_t)info.sector_size;
+    if (!info.in_use || info.sector_size != 512 || req->offset >= capacity) {
+        reply->status = 0;
+        return;
+    }
+    uint64_t len = req->len > VFS_READ_MAX ? VFS_READ_MAX : req->len;
+    if (len > capacity - req->offset) {
+        len = capacity - req->offset;
+    }
+    static uint8_t blockbuf[DISKFS_BLOCK_SIZE];
+    uint64_t copied = 0;
+    while (copied < len) {
+        uint64_t offset = req->offset + copied;
+        uint32_t block_num = (uint32_t)(offset / DISKFS_BLOCK_SIZE);
+        uint32_t block_offset = (uint32_t)(offset % DISKFS_BLOCK_SIZE);
+        if (diskfs_read_block(block_num, blockbuf) != 0) {
+            reply->status = copied ? (int64_t)copied : VFS_ERR_NOT_SUPPORTED;
+            return;
+        }
+        uint64_t chunk = DISKFS_BLOCK_SIZE - block_offset;
+        if (chunk > len - copied) {
+            chunk = len - copied;
+        }
+        for (uint64_t i = 0; i < chunk; i++) {
+            reply->data[copied + i] = blockbuf[block_offset + i];
+        }
+        copied += chunk;
+    }
+    reply->status = (int64_t)copied;
 }
 
 static void persist_file_table(void) {
@@ -153,6 +280,7 @@ static uint32_t file_block_num(int file_idx, int direct_idx) {
     return DISKFS_DATA_START_BLOCK + (uint32_t)file_idx * DISKFS_DIRECT_BLOCKS + (uint32_t)direct_idx;
 }
 static void diskfs_boot(void) {
+    blockdrv_connect();
     uint8_t buf[DISKFS_BLOCK_SIZE];
     diskfs_read_block(DISKFS_SUPERBLOCK_BLOCK, buf);
     copy_bytes(&g_sb, buf, sizeof(g_sb));
@@ -452,6 +580,9 @@ void _start(void) {
             break;
         case VFS_OP_QUIESCE:
             handle_quiesce(&m);
+            break;
+        case VFS_OP_DEVICE_READ:
+            handle_device_read(&m, from);
             break;
         case VFS_OP_RENAME:
         case VFS_OP_UNLINK:

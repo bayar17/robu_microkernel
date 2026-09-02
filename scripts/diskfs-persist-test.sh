@@ -10,12 +10,16 @@ trap 'rm -f "$IMG" "$LOG1" "$LOG2"' EXIT
 
 truncate -s 16M "$IMG"
 
-make build/robu_kernel.iso > /dev/null 2>&1
+make all > /dev/null 2>&1
+rm -f build/bootloader/ext2-kernel-debugfs-script.txt build/bootloader/ext2-kernel-userland-script.txt \
+    build/bootloader/ext2-kernel.img build/robu-kernel-disk.img
+make bootloader-kernel-disk \
+    QEMU_APPEND="root=root_task starter=hello_initsys test_exit=0 test_exit_delay=35" \
+    > /dev/null 2>&1
 
 echo "=== boot 1: creating /mnt/disk0/persist.txt ==="
 { sleep 45; printf 'touch /mnt/disk0/persist.txt\n'; sleep 8; } | \
     make run QEMU_DISK="$IMG" \
-        QEMU_APPEND="root=root_task starter=hello_initsys test_exit=0 test_exit_delay=35" \
         > "$LOG1" 2>&1 || true
 
 if ! grep -q 'touch /mnt/disk0/persist.txt' "$LOG1"; then
@@ -32,7 +36,6 @@ echo "DISKFS_WROTE_OK"
 echo "=== boot 2: verifying /mnt/disk0/persist.txt survived ==="
 { sleep 45; printf 'ls /mnt/disk0\n'; sleep 8; } | \
     make run QEMU_DISK="$IMG" \
-        QEMU_APPEND="root=root_task starter=hello_initsys test_exit=0 test_exit_delay=35" \
         > "$LOG2" 2>&1 || true
 
 if ! grep -q '\[boot\] exiting with code 0' "$LOG2"; then

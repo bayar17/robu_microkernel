@@ -8,9 +8,26 @@
 #include "robu/kinfo.h"
 #include "robu/untyped.h"
 #include "robu/framebuffer.h"
+#include "robu/dma.h"
+#include "robu/hwdrv.h"
 extern paddr_t boot_pml4;
 extern paddr_t boot_pdpt;
 static spinlock_t vm_lock = SPINLOCK_INIT;
+static void cpuid_leaf1(uint32_t *edx) {
+    uint32_t eax, ebx, ecx;
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(*edx) : "a"(1), "c"(0));
+}
+void arch_vm_enable_framebuffer_write_combining(void) {
+    uint32_t edx;
+    cpuid_leaf1(&edx);
+    if ((edx & (1u << 16)) == 0) {
+        return;
+    }
+    uint32_t lo, hi;
+    asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0x277u));
+    lo = (lo & ~(0xffu << 8)) | (1u << 8);
+    asm volatile("wrmsr" : : "c"(0x277u), "a"(lo), "d"(hi) : "memory");
+}
 static paddr_t alloc_table(void) {
     return pmm_alloc(PMM_COLOR_ANY);
 }
@@ -45,6 +62,9 @@ void arch_vm_destroy_address_space(paddr_t aspace) {
     paddr_t untyped_base;
     uint64_t untyped_size;
     untyped_range(&untyped_base, &untyped_size);
+    paddr_t dma_base;
+    uint64_t dma_size;
+    dma_range(&dma_base, &dma_size);
     paddr_t fb_base = g_boot_fb_present ? (paddr_t)g_boot_fb.phys_addr : 0;
     uint64_t fb_len = g_boot_fb_present ? (uint64_t)g_boot_fb.pitch * g_boot_fb.height : 0;
     spin_lock(&vm_lock);
@@ -67,6 +87,7 @@ void arch_vm_destroy_address_space(paddr_t aspace) {
                 if (pd[j] & X86_PTE_PS) {
                     paddr_t leaf = pd[j] & PAGE_MASK_2M & ~X86_PTE_NX;
                     if ((leaf < untyped_base || leaf >= untyped_base + untyped_size) &&
+                        (leaf < dma_base || leaf >= dma_base + dma_size) &&
                         (!fb_len || leaf < fb_base || leaf >= fb_base + fb_len)) {
                         pmm_free(leaf);
                     }
@@ -77,9 +98,14 @@ void arch_vm_destroy_address_space(paddr_t aspace) {
                     if (!(pt[k] & X86_PTE_P)) {
                         continue;
                     }
+                    vaddr_t vaddr = ((vaddr_t)i << 30) | ((vaddr_t)j << 21) |
+                                    ((vaddr_t)k << 12);
                     paddr_t leaf = pt[k] & PAGE_MASK_4K & ~X86_PTE_NX;
                     if ((leaf < untyped_base || leaf >= untyped_base + untyped_size) &&
-                        (!fb_len || leaf < fb_base || leaf >= fb_base + fb_len)) {
+                        (leaf < dma_base || leaf >= dma_base + dma_size) &&
+                        (!fb_len || leaf < fb_base || leaf >= fb_base + fb_len) &&
+                        (vaddr < HW_MMIO_USER_VA_BASE ||
+                         vaddr >= HW_MMIO_USER_VA_BASE + HW_MMIO_MAP_MAX)) {
                         pmm_free(leaf);
                     }
                 }
@@ -99,6 +125,9 @@ paddr_t arch_vm_clone_address_space(paddr_t src) {
     }
     paddr_t fb_base = g_boot_fb_present ? (paddr_t)g_boot_fb.phys_addr : 0;
     uint64_t fb_len = g_boot_fb_present ? (uint64_t)g_boot_fb.pitch * g_boot_fb.height : 0;
+    paddr_t dma_base;
+    uint64_t dma_size;
+    dma_range(&dma_base, &dma_size);
     pte_t *src_pml4 = (pte_t *)src;
     pte_t *kernel_pdpt = (pte_t *)&boot_pdpt;
     if (!(src_pml4[0] & X86_PTE_P)) {
@@ -126,7 +155,16 @@ paddr_t arch_vm_clone_address_space(paddr_t src) {
                     continue;
                 }
                 paddr_t src_frame = src_pt[k] & PAGE_MASK_4K & ~X86_PTE_NX;
+                vaddr_t vaddr = ((vaddr_t)i << 30) | ((vaddr_t)j << 21) |
+                                ((vaddr_t)k << 12);
                 if (fb_len && src_frame >= fb_base && src_frame < fb_base + fb_len) {
+                    continue;
+                }
+                if (src_frame >= dma_base && src_frame < dma_base + dma_size) {
+                    continue;
+                }
+                if (vaddr >= HW_MMIO_USER_VA_BASE &&
+                    vaddr < HW_MMIO_USER_VA_BASE + HW_MMIO_MAP_MAX) {
                     continue;
                 }
                 paddr_t dst_frame = pmm_alloc(PMM_COLOR_ANY);
@@ -134,7 +172,6 @@ paddr_t arch_vm_clone_address_space(paddr_t src) {
                     return 0;
                 }
                 memcpy((void *)dst_frame, (const void *)src_frame, PAGE_SIZE_4K);
-                vaddr_t vaddr = ((vaddr_t)i << 30) | ((vaddr_t)j << 21) | ((vaddr_t)k << 12);
                 uint32_t prot = VM_PROT_READ;
                 if (src_pt[k] & X86_PTE_RW) prot |= VM_PROT_WRITE;
                 if (src_pt[k] & X86_PTE_US) prot |= VM_PROT_USER;
@@ -180,6 +217,30 @@ int arch_vm_map_page(paddr_t aspace, vaddr_t vaddr, paddr_t paddr, uint32_t flag
     if (flags & VM_PROT_USER)  x86_flags |= X86_PTE_US;
     if (!(flags & VM_PROT_EXEC)) x86_flags |= X86_PTE_NX;
     pt[pt_index] = (paddr & PAGE_MASK_4K) | x86_flags;
+    arch_invlpg(vaddr);
+    spin_unlock(&vm_lock);
+    return 0;
+}
+int arch_vm_map_framebuffer_page(paddr_t aspace, vaddr_t vaddr, paddr_t paddr) {
+    spin_lock(&vm_lock);
+    pte_t *pml4 = (pte_t *)aspace;
+    pte_t *pdpt = get_next_level(pml4, PML4_INDEX(vaddr));
+    pte_t *pd = get_next_level(pdpt, PDPT_INDEX(vaddr));
+    pte_t *pt = get_next_level(pd, PD_INDEX(vaddr));
+    pt[PT_INDEX(vaddr)] = (paddr & PAGE_MASK_4K) | X86_PTE_P | X86_PTE_RW |
+                           X86_PTE_US | X86_PTE_PWT | X86_PTE_NX;
+    arch_invlpg(vaddr);
+    spin_unlock(&vm_lock);
+    return 0;
+}
+int arch_vm_map_device_page(paddr_t aspace, vaddr_t vaddr, paddr_t paddr) {
+    spin_lock(&vm_lock);
+    pte_t *pml4 = (pte_t *)aspace;
+    pte_t *pdpt = get_next_level(pml4, PML4_INDEX(vaddr));
+    pte_t *pd = get_next_level(pdpt, PDPT_INDEX(vaddr));
+    pte_t *pt = get_next_level(pd, PD_INDEX(vaddr));
+    pt[PT_INDEX(vaddr)] = (paddr & PAGE_MASK_4K) | X86_PTE_P | X86_PTE_RW |
+                           X86_PTE_US | X86_PTE_PWT | X86_PTE_PCD | X86_PTE_NX;
     arch_invlpg(vaddr);
     spin_unlock(&vm_lock);
     return 0;

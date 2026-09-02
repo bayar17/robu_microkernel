@@ -11,7 +11,8 @@ pmm_stats_t pmm_stats;
 static inline int color_of(paddr_t frame) {
     return (int)((frame >> PAGE_SHIFT_4K_) & (PMM_NUM_COLORS - 1));
 }
-void pmm_init(paddr_t base, uint64_t len, paddr_t reserve_base, uint64_t reserve_len) {
+void pmm_init(paddr_t base, uint64_t len, const paddr_t *reserve_bases,
+              const uint64_t *reserve_lens, int nreserved) {
     for (int c = 0; c < PMM_NUM_COLORS; c++) {
         free_head[c] = 0;
     }
@@ -30,11 +31,23 @@ void pmm_init(paddr_t base, uint64_t len, paddr_t reserve_base, uint64_t reserve
         kprintf("[pmm] WARNING: no usable RAM after excluding kernel image\n");
         return;
     }
-    paddr_t reserve_end = reserve_base + reserve_len;
+    if (nreserved > PMM_MAX_RESERVED_REGIONS) {
+        nreserved = PMM_MAX_RESERVED_REGIONS;
+    }
     uint64_t count = 0;
     for (paddr_t f = floor; f < ceiling; f += PAGE_SIZE_4K) {
-
-        if (reserve_len && f + PAGE_SIZE_4K > reserve_base && f < reserve_end) {
+        int reserved = 0;
+        for (int i = 0; i < nreserved; i++) {
+            if (!reserve_lens[i]) {
+                continue;
+            }
+            paddr_t reserve_end = reserve_bases[i] + reserve_lens[i];
+            if (f + PAGE_SIZE_4K > reserve_bases[i] && f < reserve_end) {
+                reserved = 1;
+                break;
+            }
+        }
+        if (reserved) {
             continue;
         }
         pmm_free(f);

@@ -13,7 +13,9 @@ typedef struct {
     uint64_t free_calls;
 } pmm_stats_t;
 extern pmm_stats_t pmm_stats;
-void pmm_init(paddr_t base, uint64_t len, paddr_t reserve_base, uint64_t reserve_len);
+#define PMM_MAX_RESERVED_REGIONS 16
+void pmm_init(paddr_t base, uint64_t len, const paddr_t *reserve_bases,
+              const uint64_t *reserve_lens, int nreserved);
 paddr_t pmm_alloc(int color);
 void pmm_free(paddr_t frame);
 #endif

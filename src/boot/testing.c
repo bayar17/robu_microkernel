@@ -9,14 +9,22 @@
 #include "robu/kinfo.h"
 #include "robu/testreport.h"
 #include "robu/rootfs.h"
+#include "robu/hwdrv.h"
 #include "../boot.h"
 
 static tid_t g_sh_tid;
+static paddr_t g_untyped_base;
+static uint64_t g_untyped_size;
+
+void testing_set_untyped(paddr_t untyped_base, uint64_t untyped_size) {
+    g_untyped_base = untyped_base;
+    g_untyped_size = untyped_size;
+}
 
 static void test_report_entry(void) {
     msg_regs_t m;
     tid_t from;
-    ramfs_extract_tree();
+    run_deferred_boot_inits();
     const char *starter = cmdline_get("starter");
     if (!starter) {
         starter = "sh";
@@ -156,6 +164,41 @@ static void test_report_entry(void) {
                     who, m.word[2], m.word[1], m.word[3]);
             break;
         }
+        case TEST_REPORT_KIND_PCI_TEST: {
+            uint8_t bus = (uint8_t)m.word[4];
+            uint8_t dev = (uint8_t)(m.word[4] >> 8);
+            uint8_t fn = (uint8_t)(m.word[4] >> 16);
+            kprintf("[pci-test] virtio-blk found at bus=%u dev=%u fn=%u\n", bus, dev, fn);
+            kprintf("[pci-test] %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    m.word[2], m.word[1], m.word[3]);
+            break;
+        }
+        case TEST_REPORT_KIND_DISKFS_TEST: {
+            const char *who = m.word[4] == 1 ? "write" : "verify";
+            kprintf("[diskfs-test] %s: %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    who, m.word[2], m.word[1], m.word[3]);
+            break;
+        }
+        case TEST_REPORT_KIND_FAT16FS_TEST: {
+            const char *who = m.word[4] == 2 ? "write" : "read";
+            kprintf("[fat16fs-test] %s: %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    who, m.word[2], m.word[1], m.word[3]);
+            break;
+        }
+        case TEST_REPORT_KIND_FAT32FS_TEST: {
+            kprintf("[fat32fs-test] %lu/%lu checks passed (fail bitmask=0x%lx)\n",
+                    m.word[2], m.word[1], m.word[3]);
+            break;
+        }
+        case TEST_REPORT_KIND_EXT2FS_TEST: {
+            int success = m.word[2] == m.word[1] && m.word[1] != 0;
+            kprintf("[ext2fs-test] %lu/%lu checks passed (server=%lu fail bitmask=0x%lx)\n",
+                    m.word[2], m.word[1], m.word[4], m.word[3]);
+            if (cmdline_get("ext2test_exit")) {
+                arch_test_exit(success ? 0 : 1);
+            }
+            break;
+        }
         default:
             kprintf("[test-report] unknown report kind=%lu from tid=%u\n", m.word[0], from);
             break;
@@ -166,7 +209,7 @@ static void test_report_entry(void) {
 static uint8_t stack_test_report[STACK_SIZE] __attribute__((aligned(16)));
 
 tid_t test_report_init(void) {
-    tcb_t *t = thread_create("test-report", test_report_entry, stack_test_report + STACK_SIZE, 14);
+    tcb_t *t = thread_create("test-report", test_report_entry, stack_test_report + STACK_SIZE, 8);
     kinfo_set_test_report_tid(t->tid);
     return t->tid;
 }
@@ -191,10 +234,12 @@ static void abitest_exit_helper_entry(void) {
     }
 }
 
-void abitest_init(paddr_t untyped_base, uint64_t untyped_size) {
+void abitest_init(void) {
     if (!cmdline_get("abitest")) {
         return;
     }
+    paddr_t untyped_base = g_untyped_base;
+    uint64_t untyped_size = g_untyped_size;
     const uint8_t *elf_start, *elf_end;
     if (rootfs_lookup("abitest", &elf_start, &elf_end) != 0) {
         kprintf("[boot] FATAL: rootfs has no entry named 'abitest'\n");
@@ -377,6 +422,76 @@ void shmtest_init(void) {
     toybox_spawn("shmtest_consumer", 1, (const char *const[]){ "shmtest_consumer" }, 9);
 }
 
+void pcitest_init(void) {
+    if (!cmdline_get("pcitest")) {
+        return;
+    }
+    tcb_t *t = toybox_spawn("pcitest", 1, (const char *const[]){ "pcitest" }, 9);
+    ipc_grant_pci_cfg_secondary(t->tid);
+}
+
+void diskfstest_init(void) {
+    if (cmdline_get("diskfstest_write")) {
+        toybox_spawn("diskfstest_write", 1, (const char *const[]){ "diskfstest_write" }, 9);
+    }
+    if (cmdline_get("diskfstest_verify")) {
+        toybox_spawn("diskfstest_verify", 1, (const char *const[]){ "diskfstest_verify" }, 9);
+    }
+}
+
+void fat16fstest_init(void) {
+    if (!cmdline_get("fat16test")) {
+        return;
+    }
+    tcb_t *t = toybox_spawn("fat16fs", 1, (const char *const[]){ "fat16fs" }, 11);
+    ipc_grant_hw_port_io_secondary(t->tid);
+    if (kinfo_mount_add("/mnt/fat16/", t->tid) < 0) {
+        kprintf("[boot] FATAL: mount table full, cannot register fat16fs\n");
+    }
+    toybox_spawn("fat16fstest", 1, (const char *const[]){ "fat16fstest" }, 9);
+    toybox_spawn("fat16fstest_write", 1, (const char *const[]){ "fat16fstest_write" }, 9);
+}
+
+void fat32fstest_init(void) {
+    if (!cmdline_get("fat32test")) {
+        return;
+    }
+    tcb_t *t = toybox_spawn("fat32fs", 1, (const char *const[]){ "fat32fs" }, 11);
+    ipc_grant_hw_port_io_secondary(t->tid);
+    if (kinfo_mount_add("/mnt/fat32/", t->tid) < 0) {
+        kprintf("[boot] FATAL: mount table full, cannot register fat32fs\n");
+    }
+    toybox_spawn("fat32fstest", 1, (const char *const[]){ "fat32fstest" }, 11);
+}
+
+void ext2fstest_init(void) {
+    if (!cmdline_get("ext2test")) {
+        return;
+    }
+    tcb_t *t = toybox_spawn("ext2fs", 1, (const char *const[]){ "ext2fs" }, 10);
+    ipc_grant_hw_port_io_secondary(t->tid);
+    if (cmdline_get("ext2test_reject")) {
+        while (t->state != THREAD_STATE_DEAD && t->state != THREAD_STATE_ZOMBIE) {
+            sched_yield();
+        }
+        int success = t->exit_status == 1;
+        kprintf("[ext2fs-reject] mount status=%d\n", t->exit_status);
+        arch_test_exit(success ? 0 : 1);
+        return;
+    }
+    if (kinfo_mount_add("/mnt/ext2/", t->tid) < 0) {
+        kprintf("[boot] FATAL: mount table full, cannot register ext2fs\n");
+    }
+    toybox_spawn("ext2fstest", 1, (const char *const[]){ "ext2fstest" }, 10);
+}
+
+void linuxvfstest_init(void) {
+    if (!cmdline_get("linuxvfstest")) {
+        return;
+    }
+    toybox_spawn("linuxvfstest", 1, (const char *const[]){ "linuxvfstest" }, 10);
+}
+
 void socktest_init(void) {
     if (!cmdline_get("socktest")) {
         return;
@@ -398,4 +513,40 @@ void toybox_sh_c_init(void) {
         return;
     }
     toybox_spawn("sh", 3, (const char *const[]){ "sh", "-c", cmd }, 9);
+}
+
+void run_deferred_boot_inits(void) {
+    bench_init();
+    abitest_init();
+    argvtest_init();
+    panic_test_init();
+    test_exit_init();
+    toybox_cmd_init("true", 9);
+    toybox_cmd_init("false", 9);
+    toybox_cmd_init("pwd", 9);
+    toybox_cmd_init("touch", 9);
+    toybox_cmd_init_arg("cat", 9, "/dev/null");
+    toybox_cmd_init_arg("tail", 9, "/dev/null");
+    toybox_cmd_init("file", 9);
+    toybox_cmd_init("find", 9);
+    toybox_cmd_init("cp", 9);
+    toybox_cmd_init("mv", 9);
+    toybox_cmd_init("ls", 9);
+    libctest_init();
+    ramfstest_init();
+    spawntest_init();
+    sigtest_init();
+    consoletest_init();
+    mousetest_init();
+    fbtest_init();
+    shmtest_init();
+    socktest_init();
+    pcitest_init();
+    diskfstest_init();
+    fat16fstest_init();
+    fat32fstest_init();
+    ext2fstest_init();
+    linuxvfstest_init();
+    readlinetest_init();
+    toybox_sh_c_init();
 }

@@ -1,0 +1,6 @@
+#ifndef ROBU_BUSYBOX_MOUNT_H
+#define ROBU_BUSYBOX_MOUNT_H
+
+#define BLKGETSIZE64 0x80081272UL
+
+#endif

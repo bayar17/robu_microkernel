@@ -15,5 +15,6 @@ int shm_at(tid_t caller, paddr_t address_space, int shmid, uint32_t shmflg, uint
 int shm_dt(paddr_t address_space, uint64_t shmaddr);
 int shm_ctl(int shmid, int cmd, uint64_t out_words[6]);
 void shm_detach_all_for_process(paddr_t address_space);
+int shm_copy_out(int shmid, void *dst, uint64_t max_len, uint64_t *out_len);
 
 #endif

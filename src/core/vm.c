@@ -131,6 +131,9 @@ void vm_init(void) {
     cap_count = 0;
 }
 int vm_copy_from_user(paddr_t as, vaddr_t src, void *dst, uint64_t len) {
+    if (len != 0 && src + len < src) {
+        return -1;
+    }
     uint8_t *out = (uint8_t *)dst;
     uint64_t copied = 0;
     while (copied < len) {
@@ -146,6 +149,29 @@ int vm_copy_from_user(paddr_t as, vaddr_t src, void *dst, uint64_t len) {
             chunk = len - copied;
         }
         memcpy(out + copied, (const void *)(frame + page_off), chunk);
+        copied += chunk;
+    }
+    return 0;
+}
+int vm_copy_to_user(paddr_t as, vaddr_t dst, const void *src, uint64_t len) {
+    if (len != 0 && dst + len < dst) {
+        return -1;
+    }
+    const uint8_t *in = (const uint8_t *)src;
+    uint64_t copied = 0;
+    while (copied < len) {
+        vaddr_t va = dst + copied;
+        vaddr_t page_va = va & ~(PAGE_SIZE_4K - 1);
+        paddr_t frame = arch_vm_translate(as, page_va);
+        if (!frame) {
+            return -1;
+        }
+        uint64_t page_off = va - page_va;
+        uint64_t chunk = PAGE_SIZE_4K - page_off;
+        if (chunk > len - copied) {
+            chunk = len - copied;
+        }
+        memcpy((void *)(frame + page_off), in + copied, chunk);
         copied += chunk;
     }
     return 0;

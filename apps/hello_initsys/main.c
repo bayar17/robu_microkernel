@@ -14,9 +14,11 @@ static const char *const getty_ttys[GETTY_COUNT] = {
     "rstty1", "rstty2", "rstty3", "rstty4", "rstty5", "rstty6"
 };
 static pid_t getty_pid[GETTY_COUNT];
+static int getty_gate_enabled;
 
 static void spawn_getty(int i) {
-    char *const svc_argv[] = { (char *)"tty_service", (char *)getty_ttys[i], 0 };
+    char *const svc_argv[] = { (char *)"tty_service", (char *)getty_ttys[i],
+                               getty_gate_enabled ? (char *)"--wait-gate" : 0, 0 };
     int rc = __libc_spawn("tty_service", svc_argv, environ);
     if (rc < 0) {
         printf("[hello_initsys] failed to start tty_service for %s\n", getty_ttys[i]);
@@ -113,8 +115,30 @@ int main(int argc, char **argv) {
             }
         } while (rc_respawn);
     } else {
+        int gate[2] = { -1, -1 };
+        int gate_writer = -1;
+        if (pipe(gate) == 0 && dup2(gate[0], STDIN_FILENO) == STDIN_FILENO) {
+            close(gate[0]);
+            getty_gate_enabled = 1;
+            gate_writer = gate[1];
+        } else {
+            if (gate[0] >= 0) {
+                close(gate[0]);
+            }
+            if (gate[1] >= 0) {
+                close(gate[1]);
+            }
+            printf("[hello_initsys] tty startup gate unavailable\n");
+        }
         for (int i = 0; i < GETTY_COUNT; i++) {
             spawn_getty(i);
+        }
+        if (gate_writer >= 0) {
+            char tokens[GETTY_COUNT] = { 1, 1, 1, 1, 1, 1 };
+            printf("[hello_initsys] releasing tty_service startup gate\n");
+            write(gate_writer, tokens, sizeof(tokens));
+            close(gate_writer);
+            getty_gate_enabled = 0;
         }
         for (;;) {
             int status;

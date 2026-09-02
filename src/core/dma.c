@@ -16,3 +16,7 @@ paddr_t dma_region_alloc(uint64_t bytes) {
     dma_used = end;
     return dma_base + start;
 }
+void dma_range(paddr_t *out_base, uint64_t *out_size) {
+    *out_base = dma_base;
+    *out_size = dma_size;
+}

@@ -19,6 +19,20 @@ typedef enum {
 #define SYS_INFO_CAT_CONSOLE_MODE 10
 #define SYS_INFO_CAT_MOUSE_READ 23
 #define VFS_ERR_INTERRUPTED (-9)
+#define DEVFS_BLOCK_HANDLE_BASE 0x100
+#define DEVFS_BLOCK_HANDLES 8
+#define DEVFS_ROOT_PARTITION_START_LBA 2048
+typedef struct {
+    uint32_t info_device;
+    uint32_t provider;
+    uint64_t size;
+} devfs_block_node_t;
+typedef struct {
+    int in_use;
+    devfs_block_node_t node;
+    uint64_t offset;
+} devfs_block_handle_t;
+static devfs_block_handle_t block_handles[DEVFS_BLOCK_HANDLES];
 static int name_eq(const char *a, const char *b) {
     for (int i = 0; i < VFS_PATH_MAX; i++) {
         if (a[i] != b[i]) {
@@ -30,7 +44,7 @@ static int name_eq(const char *a, const char *b) {
     }
     return 1;
 }
-static int resolve_name(const char *name, dev_id_t *out) {
+static int resolve_char_name(const char *name, dev_id_t *out) {
     if (name_eq(name, "console")) { *out = DEV_CONSOLE; return 0; }
     if (name_eq(name, "null"))    { *out = DEV_NULL;    return 0; }
     if (name_eq(name, "zero"))    { *out = DEV_ZERO;    return 0; }
@@ -44,8 +58,125 @@ static int resolve_name(const char *name, dev_id_t *out) {
     if (name_eq(name, "mouse"))   { *out = DEV_MOUSE;   return 0; }
     return -1;
 }
-static int valid_handle(uint64_t h) {
+static int valid_char_handle(uint64_t h) {
     return h <= DEV_MOUSE;
+}
+static int block_handle_index(uint64_t h) {
+    if (h < DEVFS_BLOCK_HANDLE_BASE || h >= DEVFS_BLOCK_HANDLE_BASE + DEVFS_BLOCK_HANDLES) {
+        return -1;
+    }
+    int index = (int)(h - DEVFS_BLOCK_HANDLE_BASE);
+    return block_handles[index].in_use ? index : -1;
+}
+static int valid_handle(uint64_t h) {
+    return valid_char_handle(h) || block_handle_index(h) >= 0;
+}
+static int block_info_at(uint32_t index, block_device_info_t *out) {
+    const volatile kinfo_page_t *k = kinfo_user();
+    if (index >= BLOCK_DEVICE_MAX) {
+        return -1;
+    }
+    uint32_t seq0;
+    uint32_t seq1;
+    do {
+        seq0 = k->block_info_seq;
+        asm volatile("" ::: "memory");
+        *out = k->block_devices[index];
+        asm volatile("" ::: "memory");
+        seq1 = k->block_info_seq;
+    } while (seq0 != seq1 || (seq0 & 1u));
+    return out->in_use ? 0 : -1;
+}
+static void copy_name(char *out, const char *in) {
+    int i = 0;
+    while (i < VFS_NAME_MAX - 1 && in[i]) {
+        out[i] = in[i];
+        i++;
+    }
+    out[i] = '\0';
+}
+static int block_base_name(const block_device_info_t *info, char *out) {
+    if (info->device == BLOCK_DEVICE_ROOT) {
+        if (info->transport == BLOCK_TRANSPORT_XHCI) {
+            copy_name(out, "sda");
+            return 0;
+        }
+        if (info->transport == BLOCK_TRANSPORT_IDE) {
+            copy_name(out, "hda");
+            return 0;
+        }
+        if (info->transport == BLOCK_TRANSPORT_VIRTIO) {
+            copy_name(out, "vda");
+            return 0;
+        }
+    }
+    if (info->device == BLOCK_DEVICE_DATA) {
+        if (info->transport == BLOCK_TRANSPORT_VIRTIO) {
+            copy_name(out, "vda");
+            return 0;
+        }
+        if (info->transport == BLOCK_TRANSPORT_IDE) {
+            copy_name(out, "hdb");
+            return 0;
+        }
+        if (info->transport == BLOCK_TRANSPORT_XHCI) {
+            copy_name(out, "sdb");
+            return 0;
+        }
+    }
+    return -1;
+}
+static int block_node_at(uint64_t want, devfs_block_node_t *out, char *name) {
+    uint64_t index = 0;
+    for (uint32_t slot = 0; slot < BLOCK_DEVICE_MAX; slot++) {
+        block_device_info_t info;
+        char base[VFS_NAME_MAX];
+        if (block_info_at(slot, &info) != 0 || block_base_name(&info, base) != 0) {
+            continue;
+        }
+        if (index == want) {
+            out->info_device = info.device;
+            out->provider = info.device == BLOCK_DEVICE_ROOT ? VFS_DEVICE_ROOT_DISK :
+                            VFS_DEVICE_DATA_DISK;
+            out->size = info.sectors * (uint64_t)info.sector_size;
+            copy_name(name, base);
+            return 0;
+        }
+        index++;
+        if (info.device == BLOCK_DEVICE_ROOT && info.sectors > DEVFS_ROOT_PARTITION_START_LBA) {
+            if (index == want) {
+                out->info_device = info.device;
+                out->provider = VFS_DEVICE_ROOT_PARTITION;
+                out->size = (info.sectors - DEVFS_ROOT_PARTITION_START_LBA) *
+                            (uint64_t)info.sector_size;
+                copy_name(name, base);
+                int len = 0;
+                while (name[len]) {
+                    len++;
+                }
+                if (len < VFS_NAME_MAX - 1) {
+                    name[len] = '1';
+                    name[len + 1] = '\0';
+                }
+                return 0;
+            }
+            index++;
+        }
+    }
+    return -1;
+}
+static int resolve_block_name(const char *name, devfs_block_node_t *out) {
+    for (uint64_t index = 0;; index++) {
+        devfs_block_node_t node;
+        char node_name[VFS_NAME_MAX];
+        if (block_node_at(index, &node, node_name) != 0) {
+            return -1;
+        }
+        if (name_eq(name, node_name)) {
+            *out = node;
+            return 0;
+        }
+    }
 }
 static int dev_to_vt(dev_id_t id) {
     if (id == DEV_CONSOLE) {
@@ -208,12 +339,27 @@ static void handle_open(msg_regs_t *m) {
     }
     dev_id_t id;
     vfs_open_reply_t *reply = (vfs_open_reply_t *)m;
-    if (resolve_name(name, &id) != 0) {
+    if (resolve_char_name(name, &id) == 0) {
+        reply->status = 0;
+        reply->handle = (uint64_t)id;
+        return;
+    }
+    devfs_block_node_t node;
+    if (resolve_block_name(name, &node) != 0) {
         reply->status = VFS_ERR_NOT_FOUND;
         return;
     }
-    reply->status = 0;
-    reply->handle = (uint64_t)id;
+    for (int i = 0; i < DEVFS_BLOCK_HANDLES; i++) {
+        if (!block_handles[i].in_use) {
+            block_handles[i].in_use = 1;
+            block_handles[i].node = node;
+            block_handles[i].offset = 0;
+            reply->status = 0;
+            reply->handle = DEVFS_BLOCK_HANDLE_BASE + (uint64_t)i;
+            return;
+        }
+    }
+    reply->status = VFS_ERR_NO_SPACE;
 }
 static int console_fg_read_allowed(tid_t from, int vt) {
     if (vt != devfs_active_vt()) {
@@ -239,8 +385,39 @@ static void handle_read(msg_regs_t *m, tid_t from) {
     uint64_t handle = req->handle;
     uint64_t len = req->len > VFS_READ_MAX ? VFS_READ_MAX : req->len;
     vfs_read_reply_t *reply = (vfs_read_reply_t *)m;
-    if (!valid_handle(handle)) {
+    int block_index = block_handle_index(handle);
+    if (!valid_char_handle(handle) && block_index < 0) {
         reply->status = VFS_ERR_BAD_HANDLE;
+        return;
+    }
+    if (block_index >= 0) {
+        devfs_block_handle_t *hd = &block_handles[block_index];
+        if (hd->offset >= hd->node.size) {
+            reply->status = 0;
+            return;
+        }
+        if (len > hd->node.size - hd->offset) {
+            len = hd->node.size - hd->offset;
+        }
+        tid_t provider_tid;
+        if (hd->node.provider == VFS_DEVICE_ROOT_DISK ||
+            hd->node.provider == VFS_DEVICE_ROOT_PARTITION) {
+            provider_tid = (tid_t)kinfo_user()->ext2fs_tid;
+        } else if (hd->node.provider == VFS_DEVICE_DATA_DISK) {
+            provider_tid = (tid_t)kinfo_user()->diskfs_tid;
+        } else {
+            provider_tid = 0;
+        }
+        if (provider_tid == 0) {
+            reply->status = VFS_ERR_NOT_SUPPORTED;
+            return;
+        }
+        int64_t n = vfs_device_read(provider_tid, hd->node.provider,
+                                    hd->offset, reply->data, len);
+        if (n > 0) {
+            hd->offset += (uint64_t)n;
+        }
+        reply->status = n;
         return;
     }
     switch ((dev_id_t)handle) {
@@ -337,6 +514,10 @@ static void handle_peek(msg_regs_t *m, tid_t from) {
         reply->status = VFS_ERR_BAD_HANDLE;
         return;
     }
+    if (block_handle_index(handle) >= 0) {
+        reply->status = 1;
+        return;
+    }
     switch ((dev_id_t)handle) {
     case DEV_NULL:
     case DEV_ZERO:
@@ -381,6 +562,10 @@ static void handle_write(msg_regs_t *m) {
         reply->status = VFS_ERR_BAD_HANDLE;
         return;
     }
+    if (block_handle_index(handle) >= 0) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
     switch ((dev_id_t)handle) {
     case DEV_NULL:
     case DEV_ZERO:
@@ -406,7 +591,13 @@ static void handle_close(msg_regs_t *m) {
     const vfs_close_req_t *req = (const vfs_close_req_t *)m;
     uint64_t handle = req->handle;
     vfs_close_reply_t *reply = (vfs_close_reply_t *)m;
-    reply->status = valid_handle(handle) ? 0 : VFS_ERR_BAD_HANDLE;
+    int block_index = block_handle_index(handle);
+    if (block_index >= 0) {
+        block_handles[block_index].in_use = 0;
+        reply->status = 0;
+        return;
+    }
+    reply->status = valid_char_handle(handle) ? 0 : VFS_ERR_BAD_HANDLE;
 }
 static void handle_readdir(msg_regs_t *m) {
     static const char *const names[] = { "console", "null", "zero", "random",
@@ -415,15 +606,28 @@ static void handle_readdir(msg_regs_t *m) {
     const vfs_readdir_req_t *req = (const vfs_readdir_req_t *)m;
     uint64_t want = req->index;
     vfs_readdir_reply_t *reply = (vfs_readdir_reply_t *)m;
-    if (want >= sizeof(names) / sizeof(names[0])) {
+    if (want < sizeof(names) / sizeof(names[0])) {
+        reply->status = 0;
+        reply->is_dir = VFS_NODE_CHAR;
+        int i = 0;
+        while (names[want][i]) {
+            reply->name[i] = names[want][i];
+            i++;
+        }
+        reply->name[i] = '\0';
+        return;
+    }
+    devfs_block_node_t node;
+    char name[VFS_NAME_MAX];
+    if (block_node_at(want - sizeof(names) / sizeof(names[0]), &node, name) != 0) {
         reply->status = VFS_ERR_NOT_FOUND;
         return;
     }
     reply->status = 0;
-    reply->is_dir = 0;
+    reply->is_dir = VFS_NODE_BLOCK;
     int i = 0;
-    while (names[want][i]) {
-        reply->name[i] = names[want][i];
+    while (name[i]) {
+        reply->name[i] = name[i];
         i++;
     }
     reply->name[i] = '\0';
@@ -438,32 +642,91 @@ static void handle_stat(msg_regs_t *m) {
     if (name[0] == '\0') {
         reply->status = 0;
         reply->size = 0;
-        reply->is_dir = 1;
+        reply->is_dir = VFS_NODE_DIR;
         reply->ino = 0;
         return;
     }
     dev_id_t id;
-    if (resolve_name(name, &id) != 0) {
+    if (resolve_char_name(name, &id) == 0) {
+        reply->status = 0;
+        reply->size = 0;
+        reply->is_dir = VFS_NODE_CHAR;
+        reply->ino = (uint64_t)id + 1;
+        return;
+    }
+    devfs_block_node_t node;
+    if (resolve_block_name(name, &node) != 0) {
         reply->status = VFS_ERR_NOT_FOUND;
         return;
     }
     reply->status = 0;
-    reply->size = 0;
-    reply->is_dir = 0;
-    reply->ino = (uint64_t)id + 1;
+    reply->size = node.size;
+    reply->is_dir = VFS_NODE_BLOCK;
+    reply->ino = 0x100 + node.info_device * 2 +
+                 (node.provider == VFS_DEVICE_ROOT_PARTITION ? 1 : 0);
 }
 static void handle_fstat(msg_regs_t *m) {
     const vfs_fstat_req_t *req = (const vfs_fstat_req_t *)m;
     uint64_t handle = req->handle;
     vfs_stat_reply_t *reply = (vfs_stat_reply_t *)m;
-    if (!valid_handle(handle)) {
+    int block_index = block_handle_index(handle);
+    if (!valid_char_handle(handle) && block_index < 0) {
         reply->status = VFS_ERR_BAD_HANDLE;
+        return;
+    }
+    if (block_index >= 0) {
+        devfs_block_node_t *node = &block_handles[block_index].node;
+        reply->status = 0;
+        reply->size = node->size;
+        reply->is_dir = VFS_NODE_BLOCK;
+        reply->ino = 0x100 + node->info_device * 2 +
+                     (node->provider == VFS_DEVICE_ROOT_PARTITION ? 1 : 0);
         return;
     }
     reply->status = 0;
     reply->size = 0;
-    reply->is_dir = 0;
+    reply->is_dir = VFS_NODE_CHAR;
     reply->ino = handle + 1;
+}
+static void handle_seek(msg_regs_t *m) {
+    const vfs_seek_req_t *req = (const vfs_seek_req_t *)m;
+    vfs_seek_reply_t *reply = (vfs_seek_reply_t *)m;
+    int block_index = block_handle_index(req->handle);
+    if (block_index < 0) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
+    devfs_block_handle_t *hd = &block_handles[block_index];
+    uint64_t base;
+    if (req->whence == VFS_SEEK_SET) {
+        base = 0;
+    } else if (req->whence == VFS_SEEK_CUR) {
+        base = hd->offset;
+    } else if (req->whence == VFS_SEEK_END) {
+        base = hd->node.size;
+    } else {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    uint64_t offset;
+    if (req->offset < 0) {
+        uint64_t amount = (uint64_t)(-(req->offset + 1)) + 1;
+        if (amount > base) {
+            reply->status = VFS_ERR_INVALID;
+            return;
+        }
+        offset = base - amount;
+    } else {
+        uint64_t amount = (uint64_t)req->offset;
+        if (amount > hd->node.size - base) {
+            reply->status = VFS_ERR_INVALID;
+            return;
+        }
+        offset = base + amount;
+    }
+    hd->offset = offset;
+    reply->status = 0;
+    reply->offset = offset;
 }
 void _start(void) {
     check_rdrand();
@@ -495,6 +758,9 @@ void _start(void) {
             break;
         case VFS_OP_READDIR:
             handle_readdir(&m);
+            break;
+        case VFS_OP_SEEK:
+            handle_seek(&m);
             break;
         case VFS_OP_RENAME:
         case VFS_OP_UNLINK:

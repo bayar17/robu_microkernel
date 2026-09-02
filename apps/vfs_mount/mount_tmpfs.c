@@ -30,7 +30,7 @@ static void console_msg(tid_t devfs_tid, const char *s) {
 
 void _start(void) {
     tid_t devfs_tid = (tid_t)kinfo_user()->devfs_tid;
-    int ok = kinfo_user()->ramfs_tid != 0;
-    console_msg(devfs_tid, ok ? "[mount_tmpfs] / ready\n" : "[mount_tmpfs] FATAL: ramfs not running\n");
+    int ok = kinfo_user()->ext2fs_tid != 0;
+    console_msg(devfs_tid, ok ? "[mount_tmpfs] / ready\n" : "[mount_tmpfs] FATAL: ext2fs not running\n");
     ipc_exit(ok ? 0 : 1);
 }

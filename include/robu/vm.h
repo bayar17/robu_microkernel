@@ -55,7 +55,10 @@ int vm_cap_grant(tid_t owner, paddr_t base, uint64_t count, uint32_t perms);
 int vm_cap_check(tid_t owner, paddr_t paddr, uint32_t perms);
 paddr_t arch_vm_create_address_space(void);
 int arch_vm_map_page(paddr_t aspace, vaddr_t vaddr, paddr_t paddr, uint32_t flags);
+int arch_vm_map_framebuffer_page(paddr_t aspace, vaddr_t vaddr, paddr_t paddr);
+int arch_vm_map_device_page(paddr_t aspace, vaddr_t vaddr, paddr_t paddr);
 int arch_vm_map_large_page(paddr_t aspace, vaddr_t vaddr, paddr_t paddr, uint32_t flags);
+void arch_vm_enable_framebuffer_write_combining(void);
 void arch_vm_destroy_address_space(paddr_t aspace);
 paddr_t arch_vm_clone_address_space(paddr_t src);
 paddr_t arch_vm_unmap_page(paddr_t aspace, vaddr_t vaddr);
@@ -66,4 +69,5 @@ paddr_t vm_address_space_create(void);
 void vm_address_space_destroy(paddr_t aspace);
 paddr_t vm_address_space_clone(paddr_t src);
 int vm_copy_from_user(paddr_t as, vaddr_t src, void *dst, uint64_t len);
+int vm_copy_to_user(paddr_t as, vaddr_t dst, const void *src, uint64_t len);
 #endif

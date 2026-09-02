@@ -34,7 +34,8 @@
 #define IPC_FLAG_EXEC (1 << 27)
 #define IPC_FLAG_MOUNT (1 << 28)
 #define IPC_FLAG_BOOTFS (1 << 29)
-#define IPC_FLAG_BLK_IO (1 << 30)
+#define SYS_INFO_CAT_GETENTROPY 44
+#define SYS_INFO_CAT_BLOCK_INFO 45
 
 #define IPC_FLAG_RESOLVE_FAULT (1u << 31)
 #define IPC_ERR_NONE       0
@@ -47,11 +48,12 @@
 #define IPC_ERR_EXISTS     -7
 #define IPC_ERR_NO_SPACE   -8
 #define IPC_ERR_INVALID    -9
+#define IPC_ERR_BLOCKED    -10
+#define IPC_ERR_NOT_SUPPORTED -11
 void sys_ipc(void);
 void ipc_grant_console_writer(tid_t tid);
 void ipc_grant_console_driver(tid_t tid);
 void ipc_console_input_available(int vt);
 void ipc_console_interrupt(int vt, int signum);
-void ipc_grant_blk_owner(tid_t tid);
 void ipc_grant_pager_owner(tid_t tid);
 #endif

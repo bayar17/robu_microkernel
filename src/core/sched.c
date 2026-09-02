@@ -11,6 +11,7 @@
 #include "robu/signal.h"
 #include "robu/shm.h"
 #include "robu/socket.h"
+#include "robu/execreq.h"
 #include "percpu.h"
 extern volatile uint32_t cpu_online[MAX_CPUS];
 sched_stats_t sched_stats;
@@ -210,6 +211,14 @@ static void terminate_tcb(tcb_t *t, thread_state_t final_state) {
     notif_invalidate_waiter_death(t->tid);
     pipe_invalidate_tcb_death(t->tid);
     sock_cleanup_for_process(t->tid);
+    execreq_cancel_requester(t->tid);
+    if (t->tid == (tid_t)kinfo_user()->ext2fs_tid) {
+        kprintf("[boot] FATAL: ext2fs server exited status=%d\n", t->exit_status);
+        execreq_fail_all();
+    }
+    if (arch_console_get_fb_owner() == t->tid) {
+        arch_console_set_fb_owner(0);
+    }
 }
 void sched_terminate_current(void) {
     sched_terminate_to(THREAD_STATE_DEAD);

@@ -19,12 +19,19 @@ if [ -n "$ROBU_IN_DOCKER" ]; then
     exec make "$@"
 fi
 
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    exec "$(dirname "$0")/build-docker.sh" "$@"
-elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
-    exec "$(dirname "$0")/build-docker.sh" "$@"
-else
-    printf '%bidentify-os.sh: no working Docker/Podman daemon found, building natively%b\n' "$YELLOW" "$RESET" >&2
-    printf '%bresults may not exactly match the Docker-built CI environment%b\n' "$YELLOW" "$RESET" >&2
-    exec make "$@"
-fi
+case "$1" in
+    _all|_mlibc)
+        if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            exec "$(dirname "$0")/build-docker.sh" "$@"
+        elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+            exec "$(dirname "$0")/build-docker.sh" "$@"
+        else
+            printf '%bidentify-os.sh: no working Docker/Podman daemon found, building natively%b\n' "$YELLOW" "$RESET" >&2
+            printf '%bresults may not exactly match the Docker-built CI environment%b\n' "$YELLOW" "$RESET" >&2
+            exec make "$@"
+        fi
+        ;;
+    *)
+        exec make "$@"
+        ;;
+esac

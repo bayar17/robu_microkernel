@@ -50,6 +50,7 @@ typedef struct {
 
 static vt_state_t vts[VT_COUNT];
 static int active_vt = 0;
+static tid_t fb_owner_tid;
 
 #define VGA_COLS 80
 #define VGA_ROWS 25
@@ -264,7 +265,11 @@ void arch_console_switch_vt(int vt) {
     }
     active_vt = vt;
     render_screen();
-    fbconsole_clear();
+    if (!fb_owner_tid) {
+        vga_vt_state_t *g = &vga_vts[active_vt];
+        fbconsole_redraw((const uint16_t *)g->live_screen, VGA_COLS, VGA_ROWS,
+                         (uint32_t)g->live_row, (uint32_t)g->live_col);
+    }
 }
 
 int arch_console_get_active_vt(void) {
@@ -288,9 +293,19 @@ void arch_console_init(void) {
     render_screen();
 }
 
+void arch_console_set_fb_owner(tid_t tid) {
+    fb_owner_tid = tid;
+}
+
+tid_t arch_console_get_fb_owner(void) {
+    return fb_owner_tid;
+}
+
 void arch_console_putc(char c) {
     vga_putc(active_vt, c);
-    fbconsole_putc(c);
+    if (!fb_owner_tid) {
+        fbconsole_putc(c);
+    }
     if (c == '\n') {
         serial_putc('\r');
     }
@@ -301,7 +316,7 @@ static spinlock_t console_ring_lock = SPINLOCK_INIT;
 
 void arch_console_vt_putc(int vt, char c) {
     vga_putc(vt, c);
-    if (vt == active_vt) {
+    if (vt == active_vt && !fb_owner_tid) {
         fbconsole_putc(c);
     }
     if (c == '\n') {

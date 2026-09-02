@@ -9,6 +9,7 @@
 #define X86_PTE_A       (1ULL << 5)
 #define X86_PTE_D       (1ULL << 6)
 #define X86_PTE_PS      (1ULL << 7)
+#define X86_PTE_PAT     (1ULL << 7)
 #define X86_PTE_GLOBAL  (1ULL << 8)
 #define X86_PTE_NX      (1ULL << 63)
 #define PAGE_SHIFT_4K   12

@@ -21,6 +21,8 @@ void arch_console_scroll(int delta);
 int64_t arch_console_port_io(uint16_t port, int width, int is_write, uint64_t value);
 void arch_console_mouse_feed(uint64_t packed_event);
 int arch_console_mouse_read(uint64_t *out, int max);
+void arch_console_set_fb_owner(tid_t tid);
+tid_t arch_console_get_fb_owner(void);
 
 #define SYS_INFO_CAT_CONSOLE_MODE 10
 #define SYS_INFO_CAT_ACTIVE_VT 16

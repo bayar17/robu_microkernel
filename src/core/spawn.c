@@ -7,6 +7,7 @@
 #include "robu/ipc.h"
 #include "robu/arch.h"
 #include "robu/pipe.h"
+#include "robu/execreq.h"
 void spawn_exit_current(int status) {
     tcb_t *cur = current_thread;
     cur->exit_status = status;
@@ -58,6 +59,20 @@ static int copy_name(const robu_spawn_req_t *req, uint32_t total_len,
     }
     memcpy(out, spawn_scratch + req->name_off, req->name_len);
     out[req->name_len] = '\0';
+    char *base = out;
+    for (char *p = out; *p; p++) {
+        if (*p == '/') {
+            base = p + 1;
+        }
+    }
+    if (base != out) {
+        uint32_t i = 0;
+        while (base[i]) {
+            out[i] = base[i];
+            i++;
+        }
+        out[i] = '\0';
+    }
     return 0;
 }
 static int copy_str_array(uint32_t table_off, uint32_t count, uint32_t total_len,
@@ -87,6 +102,40 @@ static int copy_str_array(uint32_t table_off, uint32_t count, uint32_t total_len
     }
     out_ptrs[count] = NULL;
     return 0;
+}
+static int submit_execreq(tcb_t *caller, const char *name, uint32_t strbuf_used,
+                          uint32_t argc, uint32_t envc,
+                          uint32_t nfds, const robu_spawn_fd_t *fds, int is_spawn_create) {
+    execreq_params_t params = {0};
+    params.is_spawn_create = is_spawn_create;
+    uint32_t namelen = 0;
+    while (name[namelen] && namelen + 1 < sizeof(params.name)) {
+        params.name[namelen] = name[namelen];
+        namelen++;
+    }
+    params.name[namelen] = '\0';
+    memcpy(params.strbuf, spawn_strbuf, strbuf_used);
+    params.strbuf_used = strbuf_used;
+    params.argc = argc;
+    for (uint32_t i = 0; i < argc; i++) {
+        params.argv_off[i] = (uint32_t)((const char *)spawn_argv[i] - spawn_strbuf);
+    }
+    params.envc = envc;
+    for (uint32_t i = 0; i < envc; i++) {
+        params.envp_off[i] = (uint32_t)((const char *)spawn_envp[i] - spawn_strbuf);
+    }
+    params.nfds = nfds;
+    if (nfds > 0) {
+        memcpy(params.fds, fds, (size_t)nfds * sizeof(robu_spawn_fd_t));
+    }
+    params.prio = caller->prio;
+    params.pager_tid = caller->pager_tid;
+    params.requester_tid = caller->tid;
+    uint32_t slot;
+    if (execreq_submit(caller, &params, &slot) != 0) {
+        return IPC_ERR_NOT_FOUND;
+    }
+    return IPC_ERR_BLOCKED;
 }
 int spawn_create(tcb_t *caller, vaddr_t req_va, uint64_t req_len, tid_t *out_tid) {
     if (caller->address_space == 0) {
@@ -136,13 +185,14 @@ int spawn_create(tcb_t *caller, vaddr_t req_va, uint64_t req_len, tid_t *out_tid
     }
     const uint8_t *elf_start, *elf_end;
     if (rootfs_lookup(name, &elf_start, &elf_end) != 0) {
-        return IPC_ERR_NOT_FOUND;
+        return submit_execreq(caller, name, strbuf_used, req->argc, req->envc,
+                              req->nfds, fds, 1);
     }
     tcb_t *child = elf_load_and_spawn_req(name, elf_start, elf_end, caller->prio,
                                           caller->pager_tid,
                                           (int)req->argc, (const char *const *)spawn_argv,
                                           (int)req->envc, (const char *const *)spawn_envp,
-                                          req->nfds, fds);
+                                          req->nfds, fds, 1);
     if (!child) {
         return IPC_ERR_NO_MEM;
     }
@@ -199,12 +249,13 @@ int spawn_exec(tcb_t *caller, vaddr_t req_va, uint64_t req_len) {
     }
     const uint8_t *elf_start, *elf_end;
     if (rootfs_lookup(name, &elf_start, &elf_end) != 0) {
-        return IPC_ERR_NOT_FOUND;
+        return submit_execreq(caller, name, strbuf_used, req->argc, req->envc,
+                              req->nfds, fds, 0);
     }
     if (elf_exec_current(caller, name, elf_start, elf_end,
                          (int)req->argc, (const char *const *)spawn_argv,
                          (int)req->envc, (const char *const *)spawn_envp,
-                         req->nfds, fds) != 0) {
+                         req->nfds, fds, 1) != 0) {
         return IPC_ERR_NO_MEM;
     }
     return IPC_ERR_NONE;

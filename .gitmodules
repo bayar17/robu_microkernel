@@ -1,30 +1,18 @@
 [submodule "apps/mlibc"]
 	path = apps/mlibc
-	url = https://github.com/bayar17/mlibc.git
-[submodule "apps/minibox"]
-	path = apps/minibox
-	url = https://github.com/bayar17/minibox.git
+	url = git@git.b4yar.net:mlibc.git
+[submodule "apps/busybox"]
+	path = apps/busybox
+	url = https://git.busybox.net/busybox.git
 [submodule "apps/confuse"]
 	path = apps/confuse
-	url = https://github.com/bayar17/libconfuse.git
+	url = git@git.b4yar.net:libconfuse.git
 [submodule "apps/uACPI"]
 	path = apps/uACPI
-	url = https://github.com/uACPI/uACPI.git
+	url = git@git.b4yar.net:uACPI.git
 [submodule "apps/readline"]
 	path = apps/readline
-	url = https://github.com/bayar17/readline.git
+	url = git@git.b4yar.net:readline.git
 [submodule "apps/bash"]
 	path = apps/bash
-	url = https://github.com/bayar17/bash.git
-[submodule "apps/xserver"]
-	path = apps/xserver
-	url = https://github.com/bayar17/xserver.git
-[submodule "apps/pixman"]
-	path = apps/pixman
-	url = https://github.com/bayar17/pixman.git
-[submodule "apps/xorgproto"]
-	path = apps/xorgproto
-	url = https://github.com/bayar17/xorgproto.git
-[submodule "apps/xtrans"]
-	path = apps/xtrans
-	url = https://github.com/bayar17/libxtrans.git
+	url = git@git.b4yar.net:bash.git

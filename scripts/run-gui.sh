@@ -6,7 +6,7 @@ QEMU="${QEMU:-qemu-system-x86_64}"
 QEMU_SMP="${QEMU_SMP:-2}"
 QEMU_MEM="${QEMU_MEM:-256}"
 QEMU_DISK="${QEMU_DISK:-build/diskfs.img}"
-ISO="${1:-build/robu_kernel.iso}"
+KERNEL_DISK_IMG="${1:-build/robu-kernel-disk.img}"
 
 test -f "$QEMU_DISK" || truncate -s 16M "$QEMU_DISK"
 
@@ -30,7 +30,7 @@ case "$(uname -s)" in
         ;;
 esac
 
-exec "$QEMU" -cdrom "$ISO" \
+exec "$QEMU" -drive file="$KERNEL_DISK_IMG",format=raw -boot c \
     -smp "$QEMU_SMP" -m "$QEMU_MEM" \
     -display "$DISPLAY_BACKEND" \
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
