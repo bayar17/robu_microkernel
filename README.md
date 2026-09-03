@@ -7,148 +7,294 @@
 
 <div align="center">
 
-![Architecture](https://img.shields.io/badge/Architecture-armv7%20%7C%20armv8%20%7C%20x86__64%20%7C%20i386%20%7C%20i486%20%7C%20riscv32%20%7C%20riscv64-red)
-![Host](https://img.shields.io/badge/Host-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
-![GCC](https://img.shields.io/badge/GNU-gcc-A42E2B?logo=gnu)
-![Clang](https://img.shields.io/badge/LLVM-clang-262D3A?logo=llvm)
-![Build](https://img.shields.io/badge/Build-Makefile-427819)
+![Target](https://img.shields.io/badge/Target-x86__64-red)
+![Boot](https://img.shields.io/badge/Boot-BIOS%20%7C%20UEFI-427819)
+![Build](https://img.shields.io/badge/Build-Make%20%2B%20Docker-2496ED)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-alpha-orange)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/bayar17/robu_microkernel/ci.yml)
 
 </div>
 
-
-
 ## Robu Microkernel
 
-A microkernel written from scratch in C and assembly, built on one premise: **the performance cost of a microkernel is an engineering problem, not a law of nature.**
+Robu is a real x86_64 microkernel written from scratch in C and assembly. It has a small kernel surface for threads, address spaces, IPC, virtual memory, scheduling, capabilities, and hardware permissions. Drivers, filesystems, and most operating-system policy run as ring-3 servers.
 
-**Prior Art.** The mechanisms below — synchronous register IPC, timeslice donation, lazy scheduling with direct switch, user-space paging — come from the [L4 lineage](https://en.wikipedia.org/wiki/L4_microkernel_family), beginning with Liedtke's work in the early 1990s.
+The repository builds a static, freestanding system with no dynamic linker and no GRUB. Its boot images use Robu's own loaders:
 
-> **Alpha.** Robu can boot now and stable services, but can have many undiscovered bugs, if you find one, open a issue.
----
-#### Project Description 🖥️
+- Legacy BIOS stage1 and stage2 code with ext2 and FAT32 readers.
+- A UEFI application at the standard removable-media path `EFI/BOOT/BOOTX64.EFI`.
+- A tarless ext2 root filesystem. `/boot` contains `kernel.elf`, `cmdline.txt`, and direct bootstrap modules, not `rootfs.tar`.
+- Bash, Readline, mlibc, and BusyBox. BusyBox utilities are available through normal names such as `ls`, `cat`, `clear`, and `blkid`.
+- Ring-3 filesystem and device servers, including ext2, FAT16, FAT32, ramfs, devfs, procfs, sysfs, blockdrv, and diskfs.
 
-| | |
-|---|---|
-| **Project name** | Robu Microkernel |
-| **Shortname** | `robu_kernel` |
-| **Language** | C + assembly |
-| **Target architectures** | armv7, armv8, x86_64, i386/i486, riscv32, riscv64 |
-| **Current dev platform** | x86_64 |
-| **Build system** | GNU Make |
-| **Toolchains** | gcc, clang |
-| **Test environment** | QEMU |
-| **License** | MIT |
+Robu is alpha software. A successful build does not substitute for a real QEMU or hardware boot test.
 
----
+Current release: [Robu 0.9 release notes](RELEASE_NOTES.md).
 
-## Design Criteria
+## Requirements
 
-### What a microkernel is 🧠
----
+The kernel and userland build run inside Docker or Podman. The bootloader and disk-image steps run on the host, so install the host tools too.
 
-A microkernel keeps only what cannot live anywhere else in the privileged part of the system: threads, address spaces, and message passing. Drivers, filesystems, network stacks, and pagers all run as ordinary user-space processes.
+| Purpose | Required tools |
+| --- | --- |
+| Source checkout | Git and access to Robu's submodule remotes, or the public-remotes setup below |
+| Container build | Docker Desktop with a running daemon, or Podman with a running machine |
+| Bootloader build | Clang, LLD, LLVM tools including `llvm-objcopy` and `llvm-ar`, GNU Make, Python 3 |
+| ext2 root image | `mke2fs`, `debugfs`, and `e2fsck` from e2fsprogs |
+| FAT32 ESP | mtools: `mformat`, `mmd`, and `mcopy` |
+| Hybrid GPT image | `sgdisk` from gptfdisk or gdisk |
+| QEMU testing | `qemu-system-x86_64` |
+| UEFI QEMU testing | OVMF code and variable-store firmware files |
+| Optional ext2 hardening matrix | `genext2fs` |
 
-The payoff is isolation. A driver that faults takes down a restartable process instead of the machine. Components hold only the privileges they need, so a compromise stays contained. Subsystems can be replaced, upgraded, or restarted without recompiling — or rebooting — the kernel. That combination is why microkernels dominate in embedded and safety-critical work.
+The container image supplies Clang, LLD, LLVM, Meson, Flex, Bison, mtools, e2fsprogs, QEMU, and the libraries needed by mlibc and the userland build. `make all` builds that image automatically.
 
-### What it costs — and what Robu does about it 📉
----
+### macOS
 
-The standard objection is real: pushing services into user space converts function calls into IPC, and naive IPC is expensive. Every cost has a specific location, though, and each one is where Robu spends its design budget.
-
-**IPC round-trip cost.** Every user-space service call becomes at least one message send and one reply. Robu's core path carries short messages in registers, so the common case copies nothing — no marshalling into a kernel buffer, no buffer to allocate, size-check, or free. Transfers are a synchronous rendezvous: send blocks until the peer receives, which removes queue management and buffer lifetime from the fast path entirely.
-
-**Scheduler pressure.** If every IPC blocks a thread and wakes another, a naive kernel runs the scheduler twice per call. Robu uses *lazy scheduling* — the ready queue is not reworked on every block and unblock — and *direct switch*: on a send to a waiting receiver, control transfers straight to that thread without consulting the scheduler at all. The caller's remaining timeslice is *donated* to the callee, so a client-server round trip costs roughly what a protected procedure call should, and a service does not need its own quantum to answer promptly.
-
-**Context-switch cost.** With address-space switches on the critical path, they have to be cheap rather than merely correct. Robu keeps the switch path minimal, saves only what the ABI requires, and avoids touching structures the fast path does not need.
-
-**Memory management policy.** Robu's kernel implements the mapping mechanism and nothing more. Page faults are delegated to a user-space pager, which decides what to do about them. Policy — paging strategy, allocation, sharing — lives outside the kernel, where it can be replaced per-workload.
-
-**Interrupt handling.** In-kernel handlers do the minimum: acknowledge, and turn the event into a message for the user-space driver. Device logic never runs in privileged mode.
-
-### Clone and build
----
-## Clone and Build
-
-Robu Microkernel uses several external projects, including [mlibc](https://github.com/managarm/mlibc), [BusyBox](https://busybox.net/), [libconfuse](https://github.com/libconfuse/libconfuse), [Bash](https://savannah.gnu.org/projects/bash/), and [Readline](https://savannah.gnu.org/projects/readline/).
-
-Clone the repository together with its submodules:
+Install the host tools with Homebrew:
 
 ```sh
-git clone --recursive https://github.com/bayar17/robu_microkernel.git
+brew install llvm bison flex e2fsprogs mtools qemu gptfdisk meson python genext2fs
+brew install --cask docker
+```
+
+Start Docker Desktop before building. Podman is also supported if its machine is running.
+
+Homebrew does not always put LLVM and e2fsprogs on `PATH`. Add them for the current shell before building an image:
+
+```sh
+export PATH="$(brew --prefix llvm)/bin:$(brew --prefix bison)/bin:$(brew --prefix e2fsprogs)/sbin:$PATH"
+```
+
+On Apple Silicon, the Makefile defaults for OVMF normally resolve under `/opt/homebrew/share/qemu`. On another Homebrew prefix, locate the two firmware files and pass their paths to the EFI target:
+
+```sh
+make run-hybrid-disk-efi \
+  OVMF_CODE="/path/to/edk2-x86_64-code.fd" \
+  OVMF_VARS_TEMPLATE="/path/to/edk2-i386-vars.fd"
+```
+
+### Debian and Ubuntu
+
+Install the host build and test dependencies with:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y \
+  clang lld llvm make flex bison mtools e2fsprogs gdisk \
+  qemu-system-x86 ovmf meson libc++-dev libc++abi-dev \
+  python3 git patch bzip2 genext2fs
+```
+
+Install and start Docker, or install Podman and start its machine, before running `make all`.
+
+## Clone
+
+Clone the repository and every pinned GitHub submodule:
+
+```sh
+git clone --recurse-submodules https://github.com/bayar17/robu_microkernel.git
 cd robu_microkernel
 ```
 
-### Build Everything
+The tree uses Robu-maintained GitHub forks for mlibc, libconfuse, Readline, and Bash; the upstream uACPI repository; and BusyBox's official GitHub mirror. The pinned uACPI revision is its `6.0.0` tag.
 
-The default target builds the Robu kernel and the userspace components required to assemble the root filesystem:
+## Build a bootable system
 
-```sh
-make
-```
-
-### Build Components Separately
-
-Individual components can also be built separately. This can be useful when debugging a failed build or rebuilding a specific userspace component.
-
-Build **mlibc**:
+Run the kernel and userland build first:
 
 ```sh
-make mlibc
+make all
 ```
 
-Build **BusyBox**, which provides the POSIX-style userspace utility set:
+`make all` routes the kernel and userland build through the available container engine. Ensure the Docker daemon or Podman service you intend to use is running. The kernel Makefile intentionally rejects direct non-Linux host compilation, so on macOS a working Docker or Podman engine is required.
 
-```sh
-make busybox
-```
+Then choose an image format.
 
-Build **Readline**:
+### BIOS disk image
 
-```sh
-make readline
-```
-
-Configure and build **Bash**:
-
-```sh
-make bash-configure
-make bash-build
-```
-
-If a component fails to build, rebuilding it separately can make it easier to identify and diagnose the problem.
-
-### Build a Bootable Disk Image
-
-Once the kernel and root filesystem have been built, create a bootable disk image with Robu's own BIOS bootloader (stage1/stage2, no GRUB):
+Build the standard raw disk image for legacy BIOS:
 
 ```sh
 make bootloader-kernel-disk
 ```
 
-The resulting image is:
+Output:
 
 ```text
 build/robu-kernel-disk.img
 ```
 
-### Run in QEMU
+This image has Robu's BIOS boot sector and an ext2 root filesystem at LBA 2048. It is not an ISO.
 
-To build the disk image and boot Robu directly in QEMU:
+### Hybrid BIOS and UEFI disk image
+
+Build the recommended image for UTM or real hardware:
 
 ```sh
+make bootloader-hybrid-disk
+```
+
+Output:
+
+```text
+build/robu-hybrid-disk.img
+```
+
+The hybrid image has a GPT with two partitions:
+
+| Partition | Contents |
+| --- | --- |
+| `robu-root` | ext2 root filesystem containing `/boot/kernel.elf`, `/boot/cmdline.txt`, and `/boot/bootstrap/` |
+| `EFI System` | FAT32 ESP containing `EFI/BOOT/BOOTX64.EFI` |
+
+The same raw image is bootable through the BIOS loader or the UEFI loader. `BOOTX64.EFI` is the correct UEFI fallback filename for removable media. No UEFI NVRAM entry and no file named `ROBUSTIC.EFI` are required.
+
+## Run in QEMU
+
+The quickest serial-console boot is:
+
+```sh
+make all
 make run
 ```
 
+`make run` creates `build/diskfs.img` when needed and attaches it as a separate virtio-blk disk. Keep that separate disk: `diskfs` writes its own metadata at LBA 0, so using the boot image for both roles will corrupt the bootloader after a successful boot.
 
-### API surface
+For a graphical QEMU window:
 
-The kernel exposes a small, deliberately boring set of primitives around threads, address spaces, and IPC. **POSIX is not a kernel interface here** — POSIX-like semantics are provided by a user-space personality server built on those primitives. Applications get a familiar API; the kernel stays small enough to reason about.
+```sh
+make run-gui
+```
+
+For the hybrid image specifically:
+
+```sh
+make run-hybrid-disk-bios
+make run-hybrid-disk-efi
+```
+
+The EFI target requires OVMF. Use the `OVMF_CODE` and `OVMF_VARS_TEMPLATE` overrides shown in the macOS section when the firmware is not at the Makefile default location.
+
+The usual QEMU settings can be overridden on the command line:
+
+```sh
+make run QEMU_SMP=4 QEMU_MEM=512
+```
+
+`QEMU_APPEND` is baked into `/boot/cmdline.txt` while the ext2 image is assembled. To change it, make a clean image build:
+
+```sh
+make clean
+make all
+make bootloader-kernel-disk \
+  QEMU_APPEND='root=root_task starter=hello_initsys shmtest=1'
+make run
+```
+
+## Use in UTM
+
+1. Build `build/robu-hybrid-disk.img` with `make all` followed by `make bootloader-hybrid-disk`.
+2. Create an x86_64 QEMU virtual machine in UTM and attach `build/robu-hybrid-disk.img` as its first raw disk.
+3. Create a separate 16 MiB raw disk with `truncate -s 16M build/diskfs.img` and attach it as a second VirtIO disk.
+4. Use UEFI firmware to exercise `EFI/BOOT/BOOTX64.EFI`, or legacy BIOS firmware to exercise stage1 and stage2.
+5. Allocate at least 512 MiB of memory and two virtual CPUs for a representative boot.
+
+The second disk is required for writable diskfs state and must not replace the boot disk.
+
+## Userland layout
+
+The final ext2 root is populated at build time. It does not unpack a tarball at runtime.
+
+| Location | Contents |
+| --- | --- |
+| `/boot` | `kernel.elf`, `cmdline.txt`, and direct bootstrap modules |
+| `/bin` | Bash, BusyBox, BusyBox applet symlinks, and normal user commands |
+| `/sbin` | Power-control utilities |
+| `/Core/Servers` | `mount_devfs`, `mount_procfs`, `mount_sysfs`, `mount_tmpfs`, and `tty_service` |
+| `/etc` | `rc.conf`, `passwd`, `group`, `shells`, and `bashrc` |
+
+BusyBox is installed as `/bin/busybox` and the enabled applets are symbolic links to it. Type `ls`, `clear`, `blkid`, `cat`, or another enabled applet directly; do not prefix each command with `busybox`.
+
+## Useful targets
+
+| Command | Result |
+| --- | --- |
+| `make all` | Docker or Podman build of the kernel and required userland |
+| `make mlibc` | Build and install Robu's mlibc sysroot |
+| `make busybox` | Build the static BusyBox binary |
+| `make readline` | Build static Readline |
+| `make bash-configure` | Configure Bash against the Robu mlibc and Readline build |
+| `make bash-build` | Build Bash |
+| `make bootloader` | Build the small BIOS stage1/stage2 diagnostic image |
+| `make bootloader-kernel-disk` | Build the regular BIOS boot disk |
+| `make bootloader-hybrid-disk` | Build the GPT image with BIOS and UEFI boot support |
+| `make run` | Boot the BIOS disk in serial QEMU with a separate diskfs disk |
+| `make run-gui` | Boot the BIOS disk in a graphical QEMU window |
+| `make run-hybrid-disk-bios` | Boot the hybrid image through BIOS QEMU |
+| `make run-hybrid-disk-efi` | Boot the hybrid image through OVMF QEMU |
+| `make ext2-hardening-test` | Run the ext2 mutation, reboot, and host `e2fsck` matrix |
+| `scripts/diskfs-persist-test.sh` | Verify diskfs data survives two clean QEMU boots |
+| `make clean` | Remove the complete `build/` directory |
+
+## Validation
+
+Use a real boot log as the source of truth. A successful compilation alone does not prove the image boots or the root filesystem is usable.
+
+The ext2 hardening target builds test images, runs guest mutations, reboots them, and checks the resulting filesystems with host `e2fsck`:
+
+```sh
+make ext2-hardening-test
+```
+
+It needs `genext2fs`, e2fsprogs, QEMU, and OVMF. It takes several minutes and writes temporary images under `/tmp`.
+
+The diskfs persistence test starts two QEMU boots and checks a file created during the first boot is visible during the second:
+
+```sh
+./scripts/diskfs-persist-test.sh
+```
+
+## Troubleshooting
+
+### Docker or Podman is unavailable
+
+Start Docker Desktop, or start the Podman machine, then confirm one of these succeeds:
+
+```sh
+docker info
+podman info
+```
+
+On macOS, `make all` cannot fall back to a direct kernel build.
+
+### Meson reports stale or incompatible build data
+
+Discard the generated mlibc build directory and build again:
+
+```sh
+rm -rf build/mlibc build/mlibc-sysroot
+make all
+```
+
+### `llvm-objcopy`, `ld.lld`, or `lld-link` is not found
+
+Install LLVM and put its `bin` directory on `PATH`. The macOS command in the requirements section does that without assuming an Intel or Apple Silicon Homebrew prefix.
+
+### `mke2fs`, `debugfs`, or `e2fsck` is not found on macOS
+
+Install e2fsprogs and add its `sbin` directory to `PATH`:
+
+```sh
+brew install e2fsprogs
+export PATH="$(brew --prefix e2fsprogs)/sbin:$PATH"
+```
+
+### The next boot hangs after a previous successful boot
+
+Check that the virtual machine has a separate `diskfs.img` virtio-blk disk. If diskfs uses the boot disk, it overwrites the boot sectors by design.
 
 ## License
- 
+
 MIT. See [LICENSE](LICENSE).
-
-

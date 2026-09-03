@@ -1,18 +1,18 @@
 [submodule "apps/mlibc"]
 	path = apps/mlibc
-	url = git@git.b4yar.net:mlibc.git
+	url = https://github.com/bayar17/mlibc.git
 [submodule "apps/busybox"]
 	path = apps/busybox
-	url = https://git.busybox.net/busybox.git
+	url = https://github.com/vda-linux/busybox_mirror.git
 [submodule "apps/confuse"]
 	path = apps/confuse
-	url = git@git.b4yar.net:libconfuse.git
+	url = https://github.com/bayar17/libconfuse.git
 [submodule "apps/uACPI"]
 	path = apps/uACPI
-	url = git@git.b4yar.net:uACPI.git
+	url = https://github.com/uACPI/uACPI.git
 [submodule "apps/readline"]
 	path = apps/readline
-	url = git@git.b4yar.net:readline.git
+	url = https://github.com/bayar17/readline.git
 [submodule "apps/bash"]
 	path = apps/bash
-	url = git@git.b4yar.net:bash.git
+	url = https://github.com/bayar17/bash.git
