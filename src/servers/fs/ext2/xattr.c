@@ -103,7 +103,7 @@ static int xattr_read_entries(const uint8_t inode_buf[128], ext2_xattr_entry_t *
     }
 
     static uint8_t blockbuf[EXT2FS_MAX_BLOCK_SIZE];
-    if (block_read(block, blockbuf) != 0 || u32_get(blockbuf, 0) != EXT2_XATTR_MAGIC ||
+    if (metadata_block_read(block, blockbuf) != 0 || u32_get(blockbuf, 0) != EXT2_XATTR_MAGIC ||
         u32_get(blockbuf, 8) != 1) {
         return -1;
     }
@@ -236,14 +236,14 @@ static int xattr_write_entries(uint32_t ino, uint8_t inode_buf[128],
     }
 
     if (old_block != 0) {
-        return block_write(old_block, blockbuf);
+        return metadata_block_write(old_block, blockbuf);
     }
 
     uint32_t new_block;
     if (alloc_block(&new_block) != 0) {
         return -1;
     }
-    if (block_write(new_block, blockbuf) != 0) {
+    if (metadata_block_write(new_block, blockbuf) != 0) {
         free_block(new_block);
         return -1;
     }
@@ -403,7 +403,13 @@ static void handle_xattr(msg_regs_t *m) {
             for (uint32_t i = 0; i < value_len; i++) {
                 entries[index].value[i] = data[name_len + i];
             }
-            int result = xattr_write_entries(handle->ino, inode_buf, entries, count, block, refcount);
+            if (journal_begin() != 0) {
+                xattr_shm_dt(addr);
+                reply->status = VFS_ERR_NO_SPACE;
+                return;
+            }
+            int result = journal_finish(xattr_write_entries(handle->ino, inode_buf, entries, count,
+                                                             block, refcount));
             reply->status = result == 0 ? 0 : xattr_status_from_result(result);
         }
     } else {
@@ -415,7 +421,13 @@ static void handle_xattr(msg_regs_t *m) {
                 xattr_copy_entry(&entries[i - 1], &entries[i]);
             }
             count--;
-            int result = xattr_write_entries(handle->ino, inode_buf, entries, count, block, refcount);
+            if (journal_begin() != 0) {
+                xattr_shm_dt(addr);
+                reply->status = VFS_ERR_NO_SPACE;
+                return;
+            }
+            int result = journal_finish(xattr_write_entries(handle->ino, inode_buf, entries, count,
+                                                             block, refcount));
             reply->status = result == 0 ? 0 : xattr_status_from_result(result);
         }
     }

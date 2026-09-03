@@ -23,6 +23,10 @@ static void handle_caps(msg_regs_t *m) {
                       ROBU_VFS_FEATURE_LINUX_VFS;
 }
 
+static int journal_reserved_path(uint32_t parent_ino, const char *leaf, int leaf_len) {
+    return parent_ino == EXT2FS_ROOT_INODE && journal_is_reserved_name(leaf, leaf_len);
+}
+
 static void handle_open(msg_regs_t *m) {
     char path[VFS_PATH_MAX];
     const vfs_open_req_t *req = (const vfs_open_req_t *)m;
@@ -45,6 +49,10 @@ static void handle_open(msg_regs_t *m) {
         reply->status = VFS_ERR_NOT_DIR;
         return;
     }
+    if (journal_reserved_path(parent_ino, leaf, leaf_len)) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
 
     uint32_t ino = 0, size = 0;
     int is_dir = 0;
@@ -55,8 +63,13 @@ static void handle_open(msg_regs_t *m) {
             reply->status = VFS_ERR_NOT_FOUND;
             return;
         }
+        if (journal_begin() != 0) {
+            reply->status = VFS_ERR_NO_SPACE;
+            return;
+        }
         uint32_t new_ino;
         if (alloc_inode(&new_ino) != 0) {
+            journal_abort();
             reply->status = VFS_ERR_NO_SPACE;
             return;
         }
@@ -71,22 +84,34 @@ static void handle_open(msg_regs_t *m) {
         u32_set(inode_buf, 12, now);
         u32_set(inode_buf, 16, now);
         if (inode_io(new_ino, inode_buf, 1) != 0) {
+            journal_abort();
             reply->status = VFS_ERR_NO_SPACE;
             return;
         }
         if (insert_dirent_in_dir(parent_ino, new_ino, leaf, leaf_len, EXT2_FT_REG_FILE) != 0) {
+            journal_abort();
+            reply->status = VFS_ERR_NO_SPACE;
+            return;
+        }
+        if (journal_finish(0) != 0) {
             reply->status = VFS_ERR_NO_SPACE;
             return;
         }
         ino = new_ino;
         size = 0;
     } else if (flags & VFS_O_TRUNC) {
+        if (journal_begin() != 0) {
+            reply->status = VFS_ERR_NO_SPACE;
+            return;
+        }
         uint8_t inode_buf[128];
         if (inode_io(ino, inode_buf, 0) != 0) {
+            journal_abort();
             reply->status = VFS_ERR_NOT_FOUND;
             return;
         }
         if (free_inode_blocks(inode_buf) != 0) {
+            journal_abort();
             reply->status = VFS_ERR_NO_SPACE;
             return;
         }
@@ -98,7 +123,11 @@ static void handle_open(msg_regs_t *m) {
         uint32_t now = ext2_now();
         u32_set(inode_buf, 12, now);
         u32_set(inode_buf, 16, now);
-        inode_io(ino, inode_buf, 1);
+        if (inode_io(ino, inode_buf, 1) != 0 || journal_finish(0) != 0) {
+            journal_abort();
+            reply->status = VFS_ERR_NO_SPACE;
+            return;
+        }
         size = 0;
     }
 
@@ -174,7 +203,14 @@ static int flush_write_state(ext2_handle_t *hd) {
     if (!hd->wcache_valid || !hd->wcache_dirty) {
         return 0;
     }
-    if (block_write(hd->blocks[hd->wcache_blk_idx], hd->wcache) != 0) {
+    int own_transaction = !journal_is_active();
+    if (own_transaction && journal_begin() != 0) {
+        return -1;
+    }
+    if (block_write(hd->blocks[hd->wcache_blk_idx], hd->wcache) != 0 || blkdev_flush() != 0) {
+        if (own_transaction) {
+            journal_abort();
+        }
         return -1;
     }
     uint8_t inode_buf[128];
@@ -187,10 +223,107 @@ static int flush_write_state(ext2_handle_t *hd) {
     u32_set(inode_buf, 12, now);
     u32_set(inode_buf, 16, now);
     if (inode_io(hd->ino, inode_buf, 1) != 0) {
+        if (own_transaction) {
+            journal_abort();
+        }
+        return -1;
+    }
+    if (own_transaction && journal_finish(0) != 0) {
         return -1;
     }
     hd->wcache_dirty = 0;
     return 0;
+}
+
+static int flush_handles_for_inode(uint32_t ino) {
+    for (int i = 0; i < EXT2FS_MAX_HANDLES; i++) {
+        if (handles[i].in_use && handles[i].ino == ino && flush_write_state(&handles[i]) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int reclaim_inode_if_unused(uint32_t ino) {
+    for (int i = 0; i < EXT2FS_MAX_HANDLES; i++) {
+        if (handles[i].in_use && handles[i].ino == ino) {
+            return 0;
+        }
+    }
+    uint8_t inode_buf[128];
+    if (inode_io(ino, inode_buf, 0) != 0) {
+        return -1;
+    }
+    if (u16_get(inode_buf, 26) != 0) {
+        return 0;
+    }
+    uint16_t mode = u16_get(inode_buf, 0);
+    uint32_t size = u32_get(inode_buf, 4);
+    if (!((mode & 0xF000) == EXT2_S_IFLNK && size <= 60) &&
+        free_inode_blocks(inode_buf) != 0) {
+        return -1;
+    }
+    for (int i = 0; i < 128; i++) {
+        inode_buf[i] = 0;
+    }
+    if (inode_io(ino, inode_buf, 1) != 0) {
+        return -1;
+    }
+    return free_inode(ino);
+}
+
+static int update_parent_links(uint32_t ino, int delta) {
+    uint8_t inode_buf[128];
+    if (inode_io(ino, inode_buf, 0) != 0) {
+        return -1;
+    }
+    uint16_t links = u16_get(inode_buf, 26);
+    if ((delta < 0 && links == 0) || (delta > 0 && links == 0xffff)) {
+        return -1;
+    }
+    u16_set(inode_buf, 26, (uint16_t)(links + delta));
+    uint32_t now = ext2_now();
+    u32_set(inode_buf, 12, now);
+    u32_set(inode_buf, 16, now);
+    return inode_io(ino, inode_buf, 1);
+}
+
+static int update_group_used_dirs(uint32_t ino, int delta) {
+    uint32_t group = (ino - 1) / g_inodes_per_group;
+    uint8_t gd[32];
+    if (group >= g_num_groups || gd_read(group, gd) != 0) {
+        return -1;
+    }
+    uint16_t used = u16_get(gd, 16);
+    if ((delta < 0 && used == 0) || (delta > 0 && used == 0xffff)) {
+        return -1;
+    }
+    u16_set(gd, 16, (uint16_t)(used + delta));
+    return gd_write(group, gd);
+}
+
+static int mutation_leaf_valid(const char *leaf, int leaf_len) {
+    if (leaf_len == 0) {
+        return 0;
+    }
+    if (leaf_len == 1 && leaf[0] == '.') {
+        return 0;
+    }
+    if (leaf_len == 2 && leaf[0] == '.' && leaf[1] == '.') {
+        return 0;
+    }
+    return 1;
+}
+
+static uint8_t dirent_file_type(const uint8_t inode_buf[128]) {
+    uint16_t mode = u16_get(inode_buf, 0) & 0xF000;
+    if (mode == EXT2_S_IFDIR) {
+        return EXT2_FT_DIR;
+    }
+    if (mode == EXT2_S_IFLNK) {
+        return EXT2_FT_SYMLINK;
+    }
+    return EXT2_FT_REG_FILE;
 }
 
 static void handle_write(msg_regs_t *m) {
@@ -217,20 +350,28 @@ static void handle_write(msg_regs_t *m) {
             if (hd->num_blocks >= EXT2FS_MAX_BLOCKS) {
                 break;
             }
+            if (journal_begin() != 0) {
+                break;
+            }
             uint32_t new_block;
             if (alloc_block(&new_block) != 0) {
+                journal_abort();
                 break;
             }
             uint8_t inode_buf[128];
             if (inode_io(hd->ino, inode_buf, 0) != 0) {
-                free_block(new_block);
+                journal_abort();
                 break;
             }
             if (append_block_to_inode(inode_buf, hd->num_blocks, new_block) != 0) {
-                free_block(new_block);
+                journal_abort();
                 break;
             }
             if (inode_io(hd->ino, inode_buf, 1) != 0) {
+                journal_abort();
+                break;
+            }
+            if (journal_finish(0) != 0) {
                 break;
             }
             hd->blocks[hd->num_blocks++] = new_block;
@@ -276,9 +417,14 @@ static void handle_close(msg_regs_t *m) {
         reply->status = VFS_ERR_NO_SPACE;
         return;
     }
+    uint32_t ino = handles[h].ino;
     handles[h].in_use = 0;
     handles[h].wcache_valid = 0;
-    reply->status = 0;
+    if (journal_begin() != 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    reply->status = journal_finish(reclaim_inode_if_unused(ino)) == 0 ? 0 : VFS_ERR_NO_SPACE;
 }
 
 static void handle_fstat(msg_regs_t *m) {
@@ -323,8 +469,13 @@ static void handle_utimens(msg_regs_t *m) {
     if (!(req->flags & VFS_UTIME_OMIT_MTIME)) {
         u32_set(inode_buf, 16, (uint32_t)req->mtime);
     }
+    if (journal_begin() != 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
     u32_set(inode_buf, 12, (uint32_t)req->ctime);
-    reply->status = inode_io(handles[req->handle].ino, inode_buf, 1) == 0 ? 0 : VFS_ERR_NO_SPACE;
+    reply->status = journal_finish(inode_io(handles[req->handle].ino, inode_buf, 1)) == 0 ?
+        0 : VFS_ERR_NO_SPACE;
 }
 
 static void handle_quiesce(msg_regs_t *m) {
@@ -335,7 +486,7 @@ static void handle_quiesce(msg_regs_t *m) {
             return;
         }
     }
-    reply->status = 0;
+    reply->status = blkdev_flush() == 0 ? 0 : VFS_ERR_NO_SPACE;
 }
 
 static void handle_stat(msg_regs_t *m) {
@@ -371,6 +522,10 @@ static void handle_stat(msg_regs_t *m) {
     }
     if (prc == -2) {
         reply->status = VFS_ERR_NOT_DIR;
+        return;
+    }
+    if (journal_reserved_path(parent_ino, leaf, leaf_len)) {
+        reply->status = VFS_ERR_NOT_FOUND;
         return;
     }
     uint32_t ino, size;
@@ -415,6 +570,10 @@ static void handle_symlink(msg_regs_t *m) {
         reply->status = VFS_ERR_NOT_DIR;
         return;
     }
+    if (journal_reserved_path(parent_ino, leaf, leaf_len)) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
 
     uint32_t existing_ino, existing_size;
     int existing_is_dir;
@@ -432,8 +591,13 @@ static void handle_symlink(msg_regs_t *m) {
         return;
     }
 
+    if (journal_begin() != 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
     uint32_t new_ino;
     if (alloc_inode(&new_ino) != 0) {
+        journal_abort();
         reply->status = VFS_ERR_NO_SPACE;
         return;
     }
@@ -448,15 +612,17 @@ static void handle_symlink(msg_regs_t *m) {
         inode_buf[40 + i] = (uint8_t)target[i];
     }
     if (inode_io(new_ino, inode_buf, 1) != 0) {
+        journal_abort();
         reply->status = VFS_ERR_NO_SPACE;
         return;
     }
 
     if (insert_dirent_in_dir(parent_ino, new_ino, leaf, leaf_len, EXT2_FT_SYMLINK) != 0) {
+        journal_abort();
         reply->status = VFS_ERR_NO_SPACE;
         return;
     }
-    reply->status = 0;
+    reply->status = journal_finish(0) == 0 ? 0 : VFS_ERR_NO_SPACE;
 }
 
 static void handle_readdir(msg_regs_t *m) {
@@ -495,7 +661,9 @@ static void handle_readdir(msg_regs_t *m) {
             }
             int is_dot = (nl == 1 && dirbuf[off + 8] == '.') ||
                          (nl == 2 && dirbuf[off + 8] == '.' && dirbuf[off + 9] == '.');
-            if (ino != 0 && !is_dot) {
+            int is_journal = dir_ino == EXT2FS_ROOT_INODE &&
+                             journal_is_reserved_name((const char *)(dirbuf + off + 8), nl);
+            if (ino != 0 && !is_dot && !is_journal) {
                 if (seen == want) {
                     uint8_t entry_inode[128];
                     if (inode_io(ino, entry_inode, 0) != 0) {
@@ -549,7 +717,7 @@ static int mkdir_internal(uint32_t parent_ino, const char *name, int name_len) {
     dirbuf[19] = g_dirent_file_type ? EXT2_FT_DIR : 0;
     dirbuf[20] = '.';
     dirbuf[21] = '.';
-    if (block_write(new_block, dirbuf) != 0) {
+    if (metadata_block_write(new_block, dirbuf) != 0) {
         free_block(new_block);
         return -1;
     }
@@ -579,7 +747,7 @@ static int mkdir_internal(uint32_t parent_ino, const char *name, int name_len) {
         inode_io(parent_ino, parent_buf, 1);
     }
 
-    uint32_t pg = (parent_ino - 1) / g_inodes_per_group;
+    uint32_t pg = (new_ino - 1) / g_inodes_per_group;
     uint8_t pgd[32];
     if (gd_read(pg, pgd) == 0) {
         u16_set(pgd, 16, (uint16_t)(u16_get(pgd, 16) + 1));
@@ -610,17 +778,365 @@ static void handle_mkdir(msg_regs_t *m) {
         reply->status = VFS_ERR_NOT_DIR;
         return;
     }
+    if (journal_reserved_path(parent_ino, leaf, leaf_len)) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
 
+    if (journal_begin() != 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
     int rc = mkdir_internal(parent_ino, leaf, leaf_len);
     if (rc == -3) {
+        journal_abort();
         reply->status = VFS_ERR_EXISTS;
         return;
     }
     if (rc != 0) {
+        journal_abort();
         reply->status = VFS_ERR_NO_SPACE;
         return;
     }
-    reply->status = 0;
+    reply->status = journal_finish(0) == 0 ? 0 : VFS_ERR_NO_SPACE;
+}
+
+static int copy_wire_path(char *dst, int dst_len, const char *src, int src_len) {
+    int i = 0;
+    for (; i < src_len; i++) {
+        dst[i] = src[i];
+        if (src[i] == '\0') {
+            return 0;
+        }
+    }
+    dst[dst_len - 1] = '\0';
+    return -1;
+}
+
+static int detach_existing_entry(uint32_t parent_ino, const char *leaf, int leaf_len,
+                                 uint32_t ino, int is_dir) {
+    if (flush_handles_for_inode(ino) != 0) {
+        return -1;
+    }
+    uint8_t inode_buf[128];
+    if (inode_io(ino, inode_buf, 0) != 0) {
+        return -1;
+    }
+    uint16_t mode = u16_get(inode_buf, 0) & 0xF000;
+    if ((is_dir && mode != EXT2_S_IFDIR) || (!is_dir && mode == EXT2_S_IFDIR)) {
+        return -1;
+    }
+    uint16_t links = u16_get(inode_buf, 26);
+    if ((!is_dir && links == 0) || (is_dir && links < 2)) {
+        return -1;
+    }
+    uint32_t removed_ino;
+    if (remove_dirent_from_dir(parent_ino, leaf, leaf_len, &removed_ino) != 0 ||
+        removed_ino != ino) {
+        return -1;
+    }
+    u16_set(inode_buf, 26, is_dir ? 0 : (uint16_t)(links - 1));
+    uint32_t now = ext2_now();
+    u32_set(inode_buf, 12, now);
+    u32_set(inode_buf, 16, now);
+    if (inode_io(ino, inode_buf, 1) != 0) {
+        return -1;
+    }
+    if (is_dir &&
+        (update_parent_links(parent_ino, -1) != 0 || update_group_used_dirs(ino, -1) != 0)) {
+        return -1;
+    }
+    return reclaim_inode_if_unused(ino);
+}
+
+static int directory_is_ancestor(uint32_t ancestor_ino, uint32_t descendant_ino) {
+    uint32_t current = descendant_ino;
+    for (uint32_t hops = 0; hops <= g_inodes_count; hops++) {
+        if (current == ancestor_ino) {
+            return 1;
+        }
+        uint32_t parent;
+        if (dir_parent_ino(current, &parent) != 0) {
+            return -1;
+        }
+        if (parent == current) {
+            return 0;
+        }
+        current = parent;
+    }
+    return -1;
+}
+
+static void handle_unlink(msg_regs_t *m) {
+    char path[VFS_PATH_MAX];
+    const vfs_unlink_req_t *req = (const vfs_unlink_req_t *)m;
+    vfs_unlink_reply_t *reply = (vfs_unlink_reply_t *)m;
+    if (copy_wire_path(path, VFS_PATH_MAX, req->name, VFS_PATH_MAX) != 0) {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    uint32_t parent_ino;
+    const char *leaf;
+    int leaf_len;
+    int prc = resolve_path(path + EXT2FS_PREFIX_LEN, 0, &parent_ino, &leaf, &leaf_len);
+    if (prc == -1) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+    if (prc == -2) {
+        reply->status = VFS_ERR_NOT_DIR;
+        return;
+    }
+    if (!mutation_leaf_valid(leaf, leaf_len)) {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    if (journal_reserved_path(parent_ino, leaf, leaf_len)) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
+    uint32_t ino, size;
+    int is_dir;
+    if (find_in_dir(parent_ino, leaf, leaf_len, &ino, &size, &is_dir) != 0) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+    if (is_dir) {
+        reply->status = VFS_ERR_IS_DIR;
+        return;
+    }
+    if (journal_begin() != 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    reply->status = journal_finish(detach_existing_entry(parent_ino, leaf, leaf_len, ino, 0)) == 0 ?
+        0 : VFS_ERR_NO_SPACE;
+}
+
+static void handle_rmdir(msg_regs_t *m) {
+    char path[VFS_PATH_MAX];
+    const vfs_rmdir_req_t *req = (const vfs_rmdir_req_t *)m;
+    vfs_rmdir_reply_t *reply = (vfs_rmdir_reply_t *)m;
+    if (copy_wire_path(path, VFS_PATH_MAX, req->name, VFS_PATH_MAX) != 0) {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    uint32_t parent_ino;
+    const char *leaf;
+    int leaf_len;
+    int prc = resolve_path(path + EXT2FS_PREFIX_LEN, 0, &parent_ino, &leaf, &leaf_len);
+    if (prc == -1) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+    if (prc == -2) {
+        reply->status = VFS_ERR_NOT_DIR;
+        return;
+    }
+    if (!mutation_leaf_valid(leaf, leaf_len)) {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    if (journal_reserved_path(parent_ino, leaf, leaf_len)) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
+    uint32_t ino, size;
+    int is_dir;
+    if (find_in_dir(parent_ino, leaf, leaf_len, &ino, &size, &is_dir) != 0) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+    if (!is_dir) {
+        reply->status = VFS_ERR_NOT_DIR;
+        return;
+    }
+    int empty = dir_is_empty(ino);
+    if (empty == 0) {
+        reply->status = VFS_ERR_NOT_EMPTY;
+        return;
+    }
+    if (empty < 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    if (journal_begin() != 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    reply->status = journal_finish(detach_existing_entry(parent_ino, leaf, leaf_len, ino, 1)) == 0 ?
+        0 : VFS_ERR_NO_SPACE;
+}
+
+static void handle_rename(msg_regs_t *m) {
+    char oldpath[VFS_NAME_MAX];
+    char newpath[VFS_NAME_MAX];
+    const vfs_rename_req_t *req = (const vfs_rename_req_t *)m;
+    vfs_rename_reply_t *reply = (vfs_rename_reply_t *)m;
+    if (copy_wire_path(oldpath, VFS_NAME_MAX, req->oldname, VFS_NAME_MAX) != 0 ||
+        copy_wire_path(newpath, VFS_NAME_MAX, req->newname, VFS_NAME_MAX) != 0) {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    uint32_t old_parent_ino;
+    const char *resolved_old_leaf;
+    int old_leaf_len;
+    int old_rc = resolve_path(oldpath + EXT2FS_PREFIX_LEN, 0, &old_parent_ino,
+                              &resolved_old_leaf, &old_leaf_len);
+    if (old_rc == -1) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+    if (old_rc == -2) {
+        reply->status = VFS_ERR_NOT_DIR;
+        return;
+    }
+    char old_leaf[VFS_NAME_MAX];
+    if (!mutation_leaf_valid(resolved_old_leaf, old_leaf_len) || old_leaf_len >= VFS_NAME_MAX) {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    for (int i = 0; i < old_leaf_len; i++) {
+        old_leaf[i] = resolved_old_leaf[i];
+    }
+    old_leaf[old_leaf_len] = '\0';
+    if (journal_reserved_path(old_parent_ino, old_leaf, old_leaf_len)) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
+
+    uint32_t old_ino, old_size;
+    int old_is_dir;
+    if (find_in_dir(old_parent_ino, old_leaf, old_leaf_len, &old_ino, &old_size, &old_is_dir) != 0) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+    uint8_t old_inode[128];
+    if (inode_io(old_ino, old_inode, 0) != 0) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+
+    uint32_t new_parent_ino;
+    const char *resolved_new_leaf;
+    int new_leaf_len;
+    int new_rc = resolve_path(newpath + EXT2FS_PREFIX_LEN, 0, &new_parent_ino,
+                              &resolved_new_leaf, &new_leaf_len);
+    if (new_rc == -1) {
+        reply->status = VFS_ERR_NOT_FOUND;
+        return;
+    }
+    if (new_rc == -2) {
+        reply->status = VFS_ERR_NOT_DIR;
+        return;
+    }
+    char new_leaf[VFS_NAME_MAX];
+    if (!mutation_leaf_valid(resolved_new_leaf, new_leaf_len) || new_leaf_len >= VFS_NAME_MAX) {
+        reply->status = VFS_ERR_INVALID;
+        return;
+    }
+    for (int i = 0; i < new_leaf_len; i++) {
+        new_leaf[i] = resolved_new_leaf[i];
+    }
+    new_leaf[new_leaf_len] = '\0';
+    if (journal_reserved_path(new_parent_ino, new_leaf, new_leaf_len)) {
+        reply->status = VFS_ERR_NOT_SUPPORTED;
+        return;
+    }
+
+    int same_name = old_parent_ino == new_parent_ino && old_leaf_len == new_leaf_len;
+    for (int i = 0; same_name && i < old_leaf_len; i++) {
+        if (old_leaf[i] != new_leaf[i]) {
+            same_name = 0;
+        }
+    }
+    if (same_name) {
+        reply->status = 0;
+        return;
+    }
+    if (old_is_dir) {
+        int ancestry = directory_is_ancestor(old_ino, new_parent_ino);
+        if (ancestry != 0) {
+            reply->status = ancestry > 0 ? VFS_ERR_INVALID : VFS_ERR_NO_SPACE;
+            return;
+        }
+    }
+
+    if (journal_begin() != 0) {
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    uint32_t new_ino, new_size;
+    int new_is_dir;
+    if (find_in_dir(new_parent_ino, new_leaf, new_leaf_len, &new_ino, &new_size, &new_is_dir) == 0) {
+        if (new_ino == old_ino) {
+            journal_abort();
+            reply->status = 0;
+            return;
+        }
+        if (old_is_dir && !new_is_dir) {
+            journal_abort();
+            reply->status = VFS_ERR_NOT_DIR;
+            return;
+        }
+        if (!old_is_dir && new_is_dir) {
+            journal_abort();
+            reply->status = VFS_ERR_IS_DIR;
+            return;
+        }
+        if (new_is_dir) {
+            int empty = dir_is_empty(new_ino);
+            if (empty == 0) {
+                journal_abort();
+                reply->status = VFS_ERR_NOT_EMPTY;
+                return;
+            }
+            if (empty < 0) {
+                journal_abort();
+                reply->status = VFS_ERR_NO_SPACE;
+                return;
+            }
+        }
+        if (detach_existing_entry(new_parent_ino, new_leaf, new_leaf_len, new_ino, new_is_dir) != 0) {
+            journal_abort();
+            reply->status = VFS_ERR_NO_SPACE;
+            return;
+        }
+    }
+
+    if (insert_dirent_in_dir(new_parent_ino, old_ino, new_leaf, new_leaf_len,
+                             dirent_file_type(old_inode)) != 0) {
+        journal_abort();
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    if (old_is_dir && old_parent_ino != new_parent_ino &&
+        set_dir_parent_ino(old_ino, new_parent_ino) != 0) {
+        journal_abort();
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    uint32_t removed_ino;
+    if (remove_dirent_from_dir(old_parent_ino, old_leaf, old_leaf_len, &removed_ino) != 0 ||
+        removed_ino != old_ino) {
+        journal_abort();
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    if (old_is_dir && old_parent_ino != new_parent_ino &&
+        (update_parent_links(old_parent_ino, -1) != 0 ||
+         update_parent_links(new_parent_ino, 1) != 0)) {
+        journal_abort();
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    if (inode_io(old_ino, old_inode, 0) != 0) {
+        journal_abort();
+        reply->status = VFS_ERR_NO_SPACE;
+        return;
+    }
+    u32_set(old_inode, 12, ext2_now());
+    reply->status = journal_finish(inode_io(old_ino, old_inode, 1)) == 0 ? 0 : VFS_ERR_NO_SPACE;
 }
 
 #define ROBU_SYS_INFO_CAT_SHM_GET 25
@@ -898,7 +1414,9 @@ static void seed_fixed_dirs(void) {
         if (resolve_path(dirs[i], 0, &parent_ino, &leaf, &leaf_len) != 0) {
             continue;
         }
-        mkdir_internal(parent_ino, leaf, leaf_len);
+        if (journal_begin() == 0) {
+            journal_finish(mkdir_internal(parent_ino, leaf, leaf_len));
+        }
     }
 }
 #endif

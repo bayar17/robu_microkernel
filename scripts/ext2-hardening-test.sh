@@ -2,6 +2,8 @@
 
 set -eu
 
+export PYTHONDONTWRITEBYTECODE=1
+
 cd "$(dirname "$0")/.."
 
 GENEXT2FS="${GENEXT2FS:-$(command -v genext2fs 2>/dev/null || true)}"
@@ -23,6 +25,7 @@ OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/opt/homebrew/share/qemu/edk2-i386-var
 EXT2_BLOCK_SIZES="${EXT2_BLOCK_SIZES:-1024 2048 4096}"
 TEST_EXIT_DELAY="${EXT2_TEST_EXIT_DELAY:-90}"
 REBUILD_IMAGE="${EXT2_HARDENING_REBUILD_IMAGE:-1}"
+JOURNAL_RECOVERY_TOOL=scripts/ext2-journal-recovery.py
 
 for tool in "$GENEXT2FS" "$E2FSCK" "$MKE2FS" "$DEBUGFS" "$QEMU"; do
     if [ -z "$tool" ] || [ ! -x "$tool" ]; then
@@ -33,6 +36,11 @@ done
 
 if [ ! -f "$OVMF_CODE" ] || [ ! -f "$OVMF_VARS_TEMPLATE" ]; then
     echo "FAIL: OVMF firmware files not found" >&2
+    exit 1
+fi
+
+if [ ! -f "$JOURNAL_RECOVERY_TOOL" ]; then
+    echo "FAIL: missing journal recovery tool: $JOURNAL_RECOVERY_TOOL" >&2
     exit 1
 fi
 
@@ -57,6 +65,8 @@ fixture_root="$WORK_DIR/fixture-root"
 mkdir -p "$fixture_root/bin"
 printf 'Hello from a real ext2 filesystem, verified via e2fsprogs.\n' > "$fixture_root/testfile.txt"
 printf 'seed\n' > "$fixture_root/bin/seed.txt"
+dd if=/dev/zero bs=1048576 count=1 status=none | tr '\000' 'A' > "$fixture_root/.robu-journal"
+dd if=/dev/zero of="$fixture_root/.robu-journal" bs=512 count=1 conv=notrunc status=none
 
 if [ "$REBUILD_IMAGE" = 1 ]; then
     make all
@@ -196,10 +206,14 @@ for block_size in $EXT2_BLOCK_SIZES; do
     echo "=== ext2 ${block_size}-byte blocks: generate ==="
     "$GENEXT2FS" -f -B "$block_size" -b "$blocks" -N 4096 -d "$fixture_root" "$test_image"
     check_fs "$test_image" "baseline ${block_size}-byte blocks"
+    echo "=== ext2 ${block_size}-byte blocks: seed committed journal recovery ==="
+    python3 "$JOURNAL_RECOVERY_TOOL" seed "$test_image"
+    check_fs "$test_image" "before journal recovery ${block_size}-byte blocks"
 
     make_boot_disk "$mutation_disk" "root=root_task starter=sh ext2test=1 ext2test_exit=1 test_exit=1 test_exit_delay=$TEST_EXIT_DELAY"
-    echo "=== ext2 ${block_size}-byte blocks: mutation boot ==="
+    echo "=== ext2 ${block_size}-byte blocks: journal recovery and mutation boot ==="
     boot_guest "$mutation_disk" "$test_image" "$mutation_log"
+    python3 "$JOURNAL_RECOVERY_TOOL" verify "$test_image"
     check_fs "$test_image" "after Robu mutation ${block_size}-byte blocks"
 
     make_boot_disk "$reboot_disk" "root=root_task starter=sh ext2test=1 ext2test_exit=1 test_exit=1 test_exit_delay=$TEST_EXIT_DELAY"

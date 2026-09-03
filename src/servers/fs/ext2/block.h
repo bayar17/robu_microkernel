@@ -7,6 +7,7 @@ int blkdev_read(uint64_t sector, uint32_t count, void *buf);
 int blkdev_write(uint64_t sector, uint32_t count, const void *buf);
 int blkdev_raw_read(uint64_t sector, uint32_t count, void *buf);
 int blkdev_raw_write(uint64_t sector, uint32_t count, const void *buf);
+int blkdev_flush(void);
 uint64_t blkdev_capacity_sectors(void);
 uint32_t blkdev_transport(void);
 

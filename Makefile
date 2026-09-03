@@ -174,11 +174,18 @@ $(BOOTLOADER_EXT2_PLACEHOLDER_IMG): $(BOOTLOADER_BUILD_DIR)/ext2-debugfs-script.
 
 BOOTLOADER_EXT2_KERNEL_IMG := $(BOOTLOADER_BUILD_DIR)/ext2-kernel.img
 BOOTLOADER_EXT2_KERNEL_SIZE := 96M
+BOOTLOADER_EXT2_JOURNAL := $(BOOTLOADER_BUILD_DIR)/robu-journal-v2.bin
+BOOTLOADER_EXT2_JOURNAL_BYTES := 1048576
 ROOTFS_STAGE := $(BUILD_DIR)/rootfs-stage
 ROOTFS_STAGE_STAMP := $(ROOTFS_STAGE)/.stamp
 ROOTFS_BOOTSTRAP_NAMES := pager root_task devfs console_driver ext2fsroot procfs sysfs blockdrv diskfs
 
-$(BOOTLOADER_BUILD_DIR)/ext2-kernel-debugfs-script.txt: Makefile $(BUILD_DIR)/$(TARGET) $(ROOTFS_STAGE_STAMP)
+$(BOOTLOADER_EXT2_JOURNAL):
+	@mkdir -p $(@D)
+	dd if=/dev/zero bs=$(BOOTLOADER_EXT2_JOURNAL_BYTES) count=1 status=none | tr '\000' 'A' > $@
+	dd if=/dev/zero of=$@ bs=512 count=1 conv=notrunc status=none
+
+$(BOOTLOADER_BUILD_DIR)/ext2-kernel-debugfs-script.txt: Makefile $(BUILD_DIR)/$(TARGET) $(ROOTFS_STAGE_STAMP) $(BOOTLOADER_EXT2_JOURNAL)
 	@mkdir -p $(@D)
 	printf '%s' "$(QEMU_APPEND)" > $(BOOTLOADER_BUILD_DIR)/cmdline.txt
 	printf 'mkdir /boot\ncd /boot\nwrite %s kernel.elf\nwrite %s cmdline.txt\nmkdir bootstrap\ncd bootstrap\n' \
@@ -186,7 +193,7 @@ $(BOOTLOADER_BUILD_DIR)/ext2-kernel-debugfs-script.txt: Makefile $(BUILD_DIR)/$(
 	for n in $(ROOTFS_BOOTSTRAP_NAMES); do \
 	    printf 'write %s %s\n' "$(abspath $(ROOTFS_STAGE))/$$n" "$$n" >> $@; \
 	done
-	printf 'cd /\n' >> $@
+	printf 'cd /\nwrite %s .robu-journal\n' "$(abspath $(BOOTLOADER_EXT2_JOURNAL))" >> $@
 	python3 scripts/gen-debugfs-userland-script.py $(ROOTFS_STAGE) \
 	    $(BOOTLOADER_BUILD_DIR)/ext2-kernel-userland-script.txt
 	cat $(BOOTLOADER_BUILD_DIR)/ext2-kernel-userland-script.txt >> $@

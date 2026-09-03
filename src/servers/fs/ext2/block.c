@@ -34,6 +34,7 @@
 #define IDE_STATUS_BSY  0x80
 #define IDE_CMD_READ_SECTORS  0x20
 #define IDE_CMD_WRITE_SECTORS 0x30
+#define IDE_CMD_FLUSH_CACHE   0xE7
 #define IDE_CMD_IDENTIFY      0xEC
 #define IDE_POLL_MAX_ITERS 200000
 
@@ -160,15 +161,17 @@ static int ide_probe(void) {
 }
 
 int blkdev_probe(void) {
-    if (ide_probe() == 0) {
-        return 0;
-    }
 #ifdef EXT2FS_AS_ROOT
     if (xhci_probe() == 0) {
         g_xhci_present = 1;
         g_capacity_sectors = xhci_capacity_sectors();
         return 0;
     }
+#endif
+    if (ide_probe() == 0) {
+        return 0;
+    }
+#ifdef EXT2FS_AS_ROOT
     return -xhci_last_failure();
 #else
     return -1;
@@ -281,6 +284,25 @@ int blkdev_raw_write(uint64_t sector, uint32_t count, const void *buf) {
 
 int blkdev_write(uint64_t sector, uint32_t count, const void *buf) {
     return blkdev_raw_write(EXT2_PARTITION_START_LBA + sector, count, buf);
+}
+
+int blkdev_flush(void) {
+#ifdef EXT2FS_AS_ROOT
+    if (g_xhci_present) {
+        int rc = xhci_flush();
+        return rc == 0 ? 0 : -xhci_last_failure();
+    }
+#endif
+    if (!g_present) {
+        return -1;
+    }
+    uint8_t status;
+    if (ide_wait_status(0, IDE_STATUS_BSY, &status) != 0) {
+        return -1;
+    }
+    hw_outb(IDE_PRIMARY_IO_BASE + IDE_REG_DRIVE_HEAD, IDE_DRIVE_SELECT_MASTER);
+    hw_outb(IDE_PRIMARY_IO_BASE + IDE_REG_COMMAND, IDE_CMD_FLUSH_CACHE);
+    return ide_wait_status(0, IDE_STATUS_BSY, &status);
 }
 
 uint64_t blkdev_capacity_sectors(void) {

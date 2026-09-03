@@ -18,7 +18,7 @@ static int find_in_dir(uint32_t dir_ino, const char *name, int name_len, uint32_
     }
     static uint8_t dirbuf[EXT2FS_MAX_BLOCK_SIZE];
     for (uint32_t bi = 0; bi < nblocks; bi++) {
-        if (block_read(blocks[bi], dirbuf) != 0) {
+        if (metadata_block_read(blocks[bi], dirbuf) != 0) {
             return -1;
         }
         uint32_t off = 0;
@@ -233,7 +233,7 @@ static int insert_dirent_in_dir(uint32_t parent_ino, uint32_t new_ino, const cha
     }
     static uint8_t dirbuf[EXT2FS_MAX_BLOCK_SIZE];
     for (uint32_t bi = 0; bi < nblocks; bi++) {
-        if (block_read(blocks[bi], dirbuf) != 0) {
+        if (metadata_block_read(blocks[bi], dirbuf) != 0) {
             return -1;
         }
         uint32_t off = 0;
@@ -265,7 +265,7 @@ static int insert_dirent_in_dir(uint32_t parent_ino, uint32_t new_ino, const cha
                         dirbuf[off + 8 + i] = (uint8_t)name[i];
                     }
                 }
-                return block_write(blocks[bi], dirbuf);
+                return metadata_block_write(blocks[bi], dirbuf);
             }
             off += rec_len;
         }
@@ -288,7 +288,7 @@ static int insert_dirent_in_dir(uint32_t parent_ino, uint32_t new_ino, const cha
     for (int i = 0; i < name_len; i++) {
         zerobuf[8 + i] = (uint8_t)name[i];
     }
-    if (block_write(new_block, zerobuf) != 0) {
+    if (metadata_block_write(new_block, zerobuf) != 0) {
         return -1;
     }
     if (append_block_to_inode(parent_inode, nblocks, new_block) != 0) {
@@ -298,4 +298,137 @@ static int insert_dirent_in_dir(uint32_t parent_ino, uint32_t new_ino, const cha
     u32_set(parent_inode, 4, size + g_block_size);
     u32_set(parent_inode, 28, compute_i_blocks_sectors(parent_inode, nblocks + 1));
     return inode_io(parent_ino, parent_inode, 1);
+}
+
+static int remove_dirent_from_dir(uint32_t parent_ino, const char *name, int name_len,
+                                  uint32_t *out_ino) {
+    uint8_t parent_inode[128];
+    if (inode_io(parent_ino, parent_inode, 0) != 0) {
+        return -1;
+    }
+    uint32_t size = u32_get(parent_inode, 4);
+    uint32_t need_blocks = (size + g_block_size - 1) / g_block_size;
+    static uint32_t blocks[EXT2FS_MAX_BLOCKS];
+    uint32_t nblocks;
+    if (walk_inode_blocks(parent_inode, need_blocks, blocks, &nblocks) != 0) {
+        return -1;
+    }
+    static uint8_t dirbuf[EXT2FS_MAX_BLOCK_SIZE];
+    for (uint32_t bi = 0; bi < nblocks; bi++) {
+        if (metadata_block_read(blocks[bi], dirbuf) != 0) {
+            return -1;
+        }
+        uint32_t off = 0;
+        uint32_t prev_off = g_block_size;
+        while (off + 8 <= g_block_size) {
+            uint32_t ino = u32_get(dirbuf, off);
+            uint16_t rec_len = u16_get(dirbuf, off + 4);
+            uint8_t nl = dirbuf[off + 6];
+            if (rec_len < 8 || rec_len > g_block_size - off) {
+                return -1;
+            }
+            int match = ino != 0 && nl == name_len;
+            for (int i = 0; match && i < name_len; i++) {
+                if (dirbuf[off + 8 + i] != (uint8_t)name[i]) {
+                    match = 0;
+                }
+            }
+            if (match) {
+                if (prev_off != g_block_size) {
+                    uint16_t prev_len = u16_get(dirbuf, prev_off + 4);
+                    u16_set(dirbuf, prev_off + 4, (uint16_t)(prev_len + rec_len));
+                } else {
+                    u32_set(dirbuf, off, 0);
+                }
+                if (metadata_block_write(blocks[bi], dirbuf) != 0) {
+                    return -1;
+                }
+                *out_ino = ino;
+                return 0;
+            }
+            prev_off = off;
+            off += rec_len;
+        }
+    }
+    return -1;
+}
+
+static int dir_is_empty(uint32_t ino) {
+    uint8_t inode_buf[128];
+    if (inode_io(ino, inode_buf, 0) != 0 ||
+        (u16_get(inode_buf, 0) & 0xF000) != EXT2_S_IFDIR) {
+        return -1;
+    }
+    uint32_t size = u32_get(inode_buf, 4);
+    uint32_t need_blocks = (size + g_block_size - 1) / g_block_size;
+    static uint32_t blocks[EXT2FS_MAX_BLOCKS];
+    uint32_t nblocks;
+    if (walk_inode_blocks(inode_buf, need_blocks, blocks, &nblocks) != 0) {
+        return -1;
+    }
+    static uint8_t dirbuf[EXT2FS_MAX_BLOCK_SIZE];
+    for (uint32_t bi = 0; bi < nblocks; bi++) {
+        if (metadata_block_read(blocks[bi], dirbuf) != 0) {
+            return -1;
+        }
+        uint32_t off = 0;
+        while (off + 8 <= g_block_size) {
+            uint32_t entry_ino = u32_get(dirbuf, off);
+            uint16_t rec_len = u16_get(dirbuf, off + 4);
+            uint8_t name_len = dirbuf[off + 6];
+            if (rec_len < 8 || rec_len > g_block_size - off) {
+                return -1;
+            }
+            int is_dot = name_len == 1 && dirbuf[off + 8] == '.';
+            int is_dotdot = name_len == 2 && dirbuf[off + 8] == '.' && dirbuf[off + 9] == '.';
+            if (entry_ino != 0 && !is_dot && !is_dotdot) {
+                return 0;
+            }
+            off += rec_len;
+        }
+    }
+    return 1;
+}
+
+static int dir_parent_ino(uint32_t ino, uint32_t *out_parent_ino) {
+    uint32_t size;
+    int is_dir;
+    return find_in_dir(ino, "..", 2, out_parent_ino, &size, &is_dir);
+}
+
+static int set_dir_parent_ino(uint32_t ino, uint32_t parent_ino) {
+    uint8_t inode_buf[128];
+    if (inode_io(ino, inode_buf, 0) != 0 ||
+        (u16_get(inode_buf, 0) & 0xF000) != EXT2_S_IFDIR) {
+        return -1;
+    }
+    uint32_t size = u32_get(inode_buf, 4);
+    uint32_t need_blocks = (size + g_block_size - 1) / g_block_size;
+    static uint32_t blocks[EXT2FS_MAX_BLOCKS];
+    uint32_t nblocks;
+    if (walk_inode_blocks(inode_buf, need_blocks, blocks, &nblocks) != 0) {
+        return -1;
+    }
+    static uint8_t dirbuf[EXT2FS_MAX_BLOCK_SIZE];
+    for (uint32_t bi = 0; bi < nblocks; bi++) {
+        if (metadata_block_read(blocks[bi], dirbuf) != 0) {
+            return -1;
+        }
+        uint32_t off = 0;
+        while (off + 8 <= g_block_size) {
+            uint32_t entry_ino = u32_get(dirbuf, off);
+            uint16_t rec_len = u16_get(dirbuf, off + 4);
+            uint8_t name_len = dirbuf[off + 6];
+            if (rec_len < 8 || rec_len > g_block_size - off) {
+                return -1;
+            }
+            if (entry_ino != 0 && name_len == 2 && dirbuf[off + 8] == '.' &&
+                dirbuf[off + 9] == '.') {
+                u32_set(dirbuf, off, parent_ino);
+                return metadata_block_write(blocks[bi], dirbuf);
+            }
+            off += rec_len;
+        }
+    }
+    return -1;
 }

@@ -130,6 +130,7 @@
 #define SCSI_READ_CAPACITY_10 0x25U
 #define SCSI_READ_10 0x28U
 #define SCSI_WRITE_10 0x2AU
+#define SCSI_SYNCHRONIZE_CACHE_10 0x35U
 
 typedef struct {
     uint64_t parameter;
@@ -985,6 +986,17 @@ int xhci_read(uint64_t sector, uint32_t count, void *buf) {
 
 int xhci_write(uint64_t sector, uint32_t count, const void *buf) {
     return xhci_rw(sector, count, (void *)buf, 1);
+}
+
+int xhci_flush(void) {
+    g_failure = XHCI_FAILURE_IO;
+    uint8_t cdb[10] = {0};
+    cdb[0] = SCSI_SYNCHRONIZE_CACHE_10;
+    if (bot_command(cdb, sizeof(cdb), 0, 0) != 0) {
+        return -1;
+    }
+    g_failure = XHCI_FAILURE_NONE;
+    return 0;
 }
 
 uint64_t xhci_capacity_sectors(void) {

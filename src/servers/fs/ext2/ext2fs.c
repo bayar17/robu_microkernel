@@ -3,6 +3,7 @@
 
 #include "disk.c"
 #include "path.c"
+#include "journal.c"
 #include "xattr.c"
 #include "vfs.c"
 
@@ -110,8 +111,17 @@ void _start(void) {
         case VFS_OP_READDIR:
             handle_readdir(&m);
             break;
+        case VFS_OP_RENAME:
+            handle_rename(&m);
+            break;
+        case VFS_OP_UNLINK:
+            handle_unlink(&m);
+            break;
         case VFS_OP_QUIESCE:
             handle_quiesce(&m);
+            break;
+        case VFS_OP_RMDIR:
+            handle_rmdir(&m);
             break;
         case VFS_OP_READ_BULK:
             handle_read_bulk(&m);

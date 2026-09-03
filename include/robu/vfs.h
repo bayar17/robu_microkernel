@@ -455,11 +455,17 @@ static inline int64_t vfs_rename(tid_t server, const char *oldname, const char *
         req->oldname[i] = oldname[i];
         i++;
     }
+    if (oldname[i]) {
+        return VFS_ERR_INVALID;
+    }
     req->oldname[i] = '\0';
     i = 0;
     while (newname[i] && i < VFS_NAME_MAX - 1) {
         req->newname[i] = newname[i];
         i++;
+    }
+    if (newname[i]) {
+        return VFS_ERR_INVALID;
     }
     req->newname[i] = '\0';
     tid_t from;
